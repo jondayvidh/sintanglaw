@@ -4,8 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 
-  <title>PUP Interactive Vicinity Map</title>
-  <link rel="icon" type="image/png" href="https://www.pup.edu.ph/about/images/PUPLogo.png" />
+  <title>Sintanglaw</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -31,50 +30,50 @@
       <p id="sceneFallbackText">The 3D engine could not start. Check your connection and that WebGL is enabled, then reload.</p>
     </div>
 
-    <!-- Top-left: campus identity + directory -->
+    <!-- Top-left: website identity -->
     <div class="nav-left">
       <header class="brand-card glass">
-        <img src="https://www.pup.edu.ph/about/images/PUPLogo.png" alt="PUP emblem" class="brand-logo" />
-        <h1>Sta. Mesa Campus <i aria-hidden="true">|</i> <span>Interactive Vicinity Map</span></h1>
+        <h1>Sintanglaw</h1>
       </header>
+    </div>
 
-      <aside class="panel glass is-collapsed" id="infoPanel" aria-label="Location directory and details">
-        <button id="sidebarToggleBtn" class="panel-toggle" type="button" aria-expanded="false" aria-controls="panelBody">
+    <!-- Top-right: discovery tools  [ Directory ▼ ] [ Search... ] [ Filter ] -->
+    <div class="discovery">
+      <div class="discovery-row">
+        <button id="sidebarToggleBtn" class="panel-toggle glass" type="button" aria-expanded="false" aria-controls="panelBody">
           <span class="panel-title">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s7-6.2 7-11.5A7 7 0 0 0 5 9.5C5 14.800 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>
             Directory
           </span>
-          <span class="panel-count" id="locationCounter">0 locations</span>
           <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
         </button>
 
+        <label class="search-pill glass">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+          <input type="search" id="locationSearch" placeholder="Search location..." autocomplete="off" aria-label="Search locations" />
+        </label>
+
+        <div class="filter-wrap">
+          <button id="filterBtn" class="filter-btn glass" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Filter locations" title="Filter locations">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
+            <span class="filter-dot" id="filterDot" hidden></span>
+          </button>
+          <div class="filter-menu glass" id="filterMenu" role="menu" hidden>
+            <button type="button" role="menuitemradio" data-filter="all" aria-checked="true">All locations</button>
+            <button type="button" role="menuitemradio" data-filter="academic" aria-checked="false"><i class="swatch swatch-academic"></i>Academic</button>
+            <button type="button" role="menuitemradio" data-filter="landmark" aria-checked="false"><i class="swatch swatch-landmark"></i>Landmarks</button>
+          </div>
+        </div>
+      </div>
+
+      <aside class="panel glass is-collapsed" id="infoPanel" aria-label="Location directory and details">
         <div class="panel-body" id="panelBody">
           <article class="info-card" id="infoCard" aria-live="polite"></article>
-          <div class="dir-head"><span>All locations</span><span class="dir-hint">Flag = draw guide line</span></div>
+          <div class="dir-head"><span>All locations<span class="panel-count" id="locationCounter">0 locations</span></span><span class="dir-hint">Flag = draw guide line</span></div>
           <div id="directoryList" class="directory-list" role="list"></div>
           <p class="panel-note">Building volumes are generated placeholders positioned at each marker; they are not surveyed models.</p>
         </div>
       </aside>
-    </div>
-
-    <!-- Top-right: location discovery (search + filter) -->
-    <div class="discovery">
-      <label class="search-pill glass">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
-        <input type="search" id="locationSearch" placeholder="Search location..." autocomplete="off" aria-label="Search locations" />
-      </label>
-
-      <div class="filter-wrap">
-        <button id="filterBtn" class="filter-btn glass" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Filter locations" title="Filter locations">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
-          <span class="filter-dot" id="filterDot" hidden></span>
-        </button>
-        <div class="filter-menu glass" id="filterMenu" role="menu" hidden>
-          <button type="button" role="menuitemradio" data-filter="all" aria-checked="true">All locations</button>
-          <button type="button" role="menuitemradio" data-filter="academic" aria-checked="false"><i class="swatch swatch-academic"></i>Academic</button>
-          <button type="button" role="menuitemradio" data-filter="landmark" aria-checked="false"><i class="swatch swatch-landmark"></i>Landmarks</button>
-        </div>
-      </div>
     </div>
 
     <!-- Bottom-center: view modes + camera actions -->
