@@ -23,7 +23,6 @@
   --safe-b: env(safe-area-inset-bottom, 0px);
   /* ---- navigation layout ---- */
   --ctl-h: 44px;
-  --brand-w: 170px;
   --dock-h: 62px;
   --dock-clear: calc(var(--gap) + var(--dock-h) + 14px);
   --panel-top: calc(var(--gap) + var(--ctl-h) + 8px);
@@ -61,8 +60,10 @@ svg { width: 18px; height: 18px; flex: 0 0 auto; fill: none; stroke: currentColo
    TOP-LEFT: CAMPUS IDENTITY + DIRECTORY
 ========================= */
 
-.nav-left { position: absolute; z-index: 10; top: var(--gap); left: var(--gap); display: flex; flex-direction: column; align-items: flex-start; gap: 10px; pointer-events: none; }
-.nav-left > * { pointer-events: auto; }
+.topnav { position: absolute; z-index: 10; top: var(--gap); left: var(--gap); right: var(--gap); display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; pointer-events: none; }
+.topnav > *, .nav-left > * { pointer-events: auto; }
+.nav-left { flex: 1 1 auto; min-width: 0; max-width: 620px; display: flex; align-items: center; gap: 8px; pointer-events: none; }
+.brand-card { flex: 0 0 auto; }
 .brand-card { display: flex; align-items: center; height: var(--ctl-h); padding: 0 22px; border-radius: 999px; }
 .brand-card h1 { font-size: 0.98rem; font-weight: 800; letter-spacing: -0.005em; line-height: 1; white-space: nowrap; }
 
@@ -70,8 +71,8 @@ svg { width: 18px; height: 18px; flex: 0 0 auto; fill: none; stroke: currentColo
    TOP-RIGHT: LOCATION DISCOVERY (SEARCH + FILTER)
 ========================= */
 
-.discovery { position: absolute; z-index: 10; top: var(--gap); right: var(--gap); display: flex; flex-direction: column; align-items: flex-end; gap: 8px; width: min(560px, calc(100vw - 2 * var(--gap) - var(--brand-w) - 12px)); }
-.discovery-row { display: flex; align-items: center; gap: 8px; width: 100%; }
+.discovery { position: relative; flex: 0 0 auto; }
+.discovery-row { display: flex; align-items: center; gap: 8px; }
 .search-pill { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; height: var(--ctl-h); padding: 0 18px; border-radius: 999px; transition: border-color 200ms var(--ease), box-shadow 200ms var(--ease); }
 .search-pill:focus-within { border-color: var(--copper-soft); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 0 0 3px rgba(184, 115, 51, 0.18), 0 18px 48px rgba(0, 0, 0, 0.45); }
 .search-pill svg { color: var(--copper); }
@@ -97,7 +98,7 @@ svg { width: 18px; height: 18px; flex: 0 0 auto; fill: none; stroke: currentColo
    LEFT PANEL (DIRECTORY + DETAILS)
 ========================= */
 
-.panel { width: min(380px, 100%); max-height: calc(100dvh - var(--panel-top) - var(--dock-clear) - var(--safe-b)); display: flex; flex-direction: column; border-radius: var(--r-lg); overflow: hidden; transition: width 260ms var(--ease), border-radius 260ms var(--ease), border-color 200ms var(--ease); }
+.panel { position: absolute; top: calc(100% + 8px); right: 0; width: min(380px, calc(100vw - 2 * var(--gap))); max-height: calc(100dvh - var(--panel-top) - var(--dock-clear) - var(--safe-b)); display: flex; flex-direction: column; border-radius: var(--r-lg); overflow: hidden; transition: width 260ms var(--ease), border-radius 260ms var(--ease), border-color 200ms var(--ease); }
 .panel.is-collapsed { display: none; }
 .panel-toggle { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; height: var(--ctl-h); padding: 0 16px 0 18px; border-radius: 999px; text-align: left; transition: color 200ms var(--ease), border-color 200ms var(--ease), transform 120ms var(--ease); }
 .panel-toggle:hover { border-color: var(--copper-soft); }
@@ -200,9 +201,13 @@ svg { width: 18px; height: 18px; flex: 0 0 auto; fill: none; stroke: currentColo
 
 @media (max-width: 560px) {
   :root { --panel-top: calc(var(--gap) + var(--ctl-h) + 8px + var(--ctl-h) + 8px); }
-  .discovery { top: calc(var(--gap) + var(--ctl-h) + 8px); left: var(--gap); width: auto; }
+  .topnav { display: grid; grid-template-columns: auto 1fr; grid-template-areas: "brand nav" "search search"; gap: 8px; }
+  .nav-left { display: contents; }
+  .brand-card { grid-area: brand; }
+  .search-pill { grid-area: search; }
+  .discovery { position: static; grid-area: nav; justify-self: end; }
   .discovery-row { gap: 6px; }
-  .panel { width: 100%; }
+  .panel { left: 0; right: 0; width: auto; }
   .panel-toggle { gap: 6px; padding: 0 12px 0 14px; }
   .search-pill { padding: 0 14px; gap: 8px; }
   .dock { gap: 8px; padding: 6px; overflow-x: auto; scrollbar-width: none; }
