@@ -18,7 +18,8 @@
   <!-- 3D engine (pinned versions). Order matters: deferred scripts run in sequence. -->
   <script defer src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
-  <script defer src="script.js"></script>
+  <!-- Application code: ES modules (entry: main.js). Deferred, so it runs after the 3D engine above. -->
+  <script type="module" src="main.js"></script>
 </head>
 <body>
   <div class="app" id="app">
@@ -30,14 +31,20 @@
       <p id="sceneFallbackText">The 3D engine could not start. Check your connection and that WebGL is enabled, then reload.</p>
     </div>
 
-    <!-- Top-left: website identity -->
+    <!-- Floating navigation: Sintanglaw > Search  |  Directory > Filter -->
+    <div class="topnav">
+    <!-- Left group: identity + primary action -->
     <div class="nav-left">
       <header class="brand-card glass">
         <h1>Sintanglaw</h1>
       </header>
+      <label class="search-pill glass">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+        <input type="search" id="locationSearch" placeholder="Search location..." autocomplete="off" aria-label="Search locations" />
+      </label>
     </div>
 
-    <!-- Top-right: discovery tools  [ Directory ▼ ] [ Search... ] [ Filter ] -->
+    <!-- Right group: browsing + refinement -->
     <div class="discovery">
       <div class="discovery-row">
         <button id="sidebarToggleBtn" class="panel-toggle glass" type="button" aria-expanded="false" aria-controls="panelBody">
@@ -47,11 +54,6 @@
           </span>
           <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
         </button>
-
-        <label class="search-pill glass">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
-          <input type="search" id="locationSearch" placeholder="Search location..." autocomplete="off" aria-label="Search locations" />
-        </label>
 
         <div class="filter-wrap">
           <button id="filterBtn" class="filter-btn glass" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Filter locations" title="Filter locations">
@@ -74,6 +76,7 @@
           <p class="panel-note">Building volumes are generated placeholders positioned at each marker; they are not surveyed models.</p>
         </div>
       </aside>
+    </div>
     </div>
 
     <!-- Bottom-center: view modes + camera actions -->
