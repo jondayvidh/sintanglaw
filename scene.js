@@ -12,7 +12,6 @@ let renderer, scene, camera, controls, selRing, pathGroup;
 let selRingBase = 1;
 let fly = null;
 let lastFrame = 0;
-let homeTarget, homePos;
 let hoverId = null;
 let overlapFrame = 0;
 let MAX_ANISO = 4;
@@ -32,6 +31,17 @@ const MIN_ZOOM_DISTANCE = 8;
 const MAX_ZOOM_DISTANCE = 230;
 const ZOOM_STEP = 1.6;
 const PATH_COLORS = [0xf1b434, 0xffffff, 0xb87333];
+
+/* Preferred orbit perspective, shared by the landing view, the Orbit View preset, the reset view and the focus fallback:
+   a shallow, oblique view across the campus from the south-west, so building facades, the horizon and a band of sky stay in
+   frame. Only the viewing direction is fixed here; the focal point and distance are solved from the location markers and the
+   viewport aspect (see orbitHomePose). */
+const ORBIT_VIEW = {
+  azimuth: -30,                                   // degrees around the focal point: 0 = camera due south looking north, negative = swung west
+  elevation: 14,                                  // degrees above the horizon (the previous default sat at about 44 degrees)
+  frame: { x: 0.9, top: 0.62, bottom: -0.78 },    // share of the viewport (NDC) the markers may occupy; keeps them clear of the sky band and the dock
+  maxDistance: MAX_ZOOM_DISTANCE * 0.85           // on narrow screens crop the campus rather than pull back into the fog
+};
 
 /* =====================================================================
    Coordinate helpers
@@ -1437,12 +1447,48 @@ export function updateVisualState() {
    Camera, view modes and zoom
    ===================================================================== */
 
+/* Offset of length len from the focal point to the camera, in the preferred orbit direction (ORBIT_VIEW). */
 function obliqueDir(len) {
-  return new THREE.Vector3(-0.38, 0.7, 0.62).normalize().multiplyScalar(len);
+  const a = THREE.MathUtils.degToRad(ORBIT_VIEW.azimuth), e = THREE.MathUtils.degToRad(ORBIT_VIEW.elevation);
+  return new THREE.Vector3(Math.cos(e) * Math.sin(a), Math.sin(e), Math.cos(e) * Math.cos(a)).multiplyScalar(len);
+}
+
+/* Home pose, used for the landing view, Orbit View and reset: the preferred direction, with the focal point and distance
+   solved so that every location marker sits inside ORBIT_VIEW.frame for the given viewport aspect. The distance is the
+   smallest that fits; the focal point is shifted sideways until the markers are centred (seen from an oblique angle the
+   nearer side of the campus reads wider, so the geometric centre alone looks lopsided). */
+function orbitHomePose(aspect = camera.aspect) {
+  const { frame, maxDistance } = ORBIT_VIEW;
+  const dir = obliqueDir(1), fwd = dir.clone().negate();
+  const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0)).normalize();
+  const up = new THREE.Vector3().crossVectors(right, fwd);
+  const tanV = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)), tanH = tanV * aspect;
+  const pts = [...pins.values()].map((p) => p.worldPos);
+  const focus = new THREE.Box3().setFromPoints(pts).getCenter(new THREE.Vector3());
+  focus.y = 1;
+  let dist = maxDistance;
+  for (let i = 0; i < 8; i++) {
+    dist = 0;
+    const rel = pts.map((p) => p.clone().sub(focus));
+    for (const r of rel) {
+      const x = r.dot(right), y = r.dot(up), z = r.dot(fwd);        // z = how far the point lies beyond the focal plane
+      dist = Math.max(dist, Math.abs(x) / (tanH * frame.x) - z, y / (tanV * (y > 0 ? frame.top : frame.bottom)) - z);
+    }
+    dist = THREE.MathUtils.clamp(dist, MIN_ZOOM_DISTANCE, maxDistance);
+    let lo = Infinity, hi = -Infinity;
+    for (const r of rel) { const n = r.dot(right) / (tanH * (dist + r.dot(fwd))); lo = Math.min(lo, n); hi = Math.max(hi, n); }
+    focus.addScaledVector(right, ((lo + hi) / 2) * tanH * dist);    // re-centre horizontally
+  }
+  return { pos: focus.clone().addScaledVector(dir, dist), target: focus };
 }
 
 function onResize() {
   const w = window.innerWidth, h = window.innerHeight;
+  let atHome = false;
+  if (ready && state.mode === "orbit" && !fly) {                   // still untouched on the home pose? then re-fit it to the new viewport
+    const home = orbitHomePose();
+    atHome = camera.position.distanceToSquared(home.pos) < 0.01 && controls.target.distanceToSquared(home.target) < 0.01;
+  }
   renderer.setSize(w, h);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
@@ -1451,6 +1497,10 @@ function onResize() {
     camera.position.copy(p.pos);
     controls.target.copy(p.target);
     applyLimits("topdown");
+  } else if (atHome) {
+    const home = orbitHomePose();
+    camera.position.copy(home.pos);
+    controls.target.copy(home.target);
   }
 }
 
@@ -1533,9 +1583,8 @@ function setMode(mode, opts = {}) {
   applyLimits("free");
   if (mode === "orbit") {
     if (prev === "topdown" || prev === "walking" || opts.force) {
-      const t = prev === "walking" ? a : controls.target.clone();
-      t.y = 1;
-      flyTo(t.clone().add(obliqueDir(70)), t, 950, () => applyLimits("orbit"));
+      const home = orbitHomePose();
+      flyTo(home.pos, home.target, 950, () => applyLimits("orbit"));
     } else applyLimits("orbit");
   } else if (mode === "topdown") {
     const p = topDownPose();
@@ -1736,11 +1785,10 @@ export function initScene({ onSelectLocation }) {
   });
   controls.addEventListener("change", syncZoomButtons);
 
-  const home = toWorld({ x: 1130, y: 560 });
-  homeTarget = new THREE.Vector3(home.x, 1, home.z);
-  homePos = homeTarget.clone().add(obliqueDir(88));
-  camera.position.copy(homePos);
-  controls.target.copy(homeTarget);
+  onResize();                                                      // size the renderer and camera aspect first: the home pose is fitted to the viewport
+  const home = orbitHomePose();
+  camera.position.copy(home.pos);
+  controls.target.copy(home.target);
   applyLimits("orbit");
 
   /* input */
@@ -1754,7 +1802,6 @@ export function initScene({ onSelectLocation }) {
     if (id != null) onSelectLocation(id);
   });
   window.addEventListener("resize", onResize);
-  onResize();
   ready = true;
 }
 
@@ -1829,6 +1876,7 @@ export function resetCameraView() {
   if (ready) {
     setFogEnabled(true);
     applyLimits("free");
-    flyTo(homePos, homeTarget, 1000, () => applyLimits("orbit"));
+    const home = orbitHomePose();
+    flyTo(home.pos, home.target, 1000, () => applyLimits("orbit"));
   }
 }
