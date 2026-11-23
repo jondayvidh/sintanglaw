@@ -23,10 +23,10 @@
   --safe-b: env(safe-area-inset-bottom, 0px);
   /* ---- navigation layout ---- */
   --ctl-h: 44px;
-  --brand-w: 340px;
+  --brand-w: 170px;
   --dock-h: 62px;
   --dock-clear: calc(var(--gap) + var(--dock-h) + 14px);
-  --panel-top: calc(var(--gap) + 62px);
+  --panel-top: calc(var(--gap) + var(--ctl-h) + 8px);
 }
 
 html, body { height: 100%; }
@@ -35,6 +35,8 @@ button, input { font: inherit; color: inherit; }
 button { border: 0; background: none; cursor: pointer; }
 svg { width: 18px; height: 18px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 [hidden] { display: none !important; }
+* { scrollbar-width: none; -ms-overflow-style: none; }
+*::-webkit-scrollbar { display: none; width: 0; height: 0; }
 :focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 
 /* =========================
@@ -61,17 +63,15 @@ svg { width: 18px; height: 18px; flex: 0 0 auto; fill: none; stroke: currentColo
 
 .nav-left { position: absolute; z-index: 10; top: var(--gap); left: var(--gap); display: flex; flex-direction: column; align-items: flex-start; gap: 10px; pointer-events: none; }
 .nav-left > * { pointer-events: auto; }
-.brand-card { display: flex; align-items: center; gap: 12px; padding: 8px 18px 8px 8px; border-radius: 999px; }
-.brand-logo { width: 38px; height: 38px; object-fit: contain; border-radius: 50%; background: #f3e5d6; padding: 3px; box-shadow: 0 0 0 1px var(--copper-soft); }
-.brand-card h1 { font-size: 0.86rem; font-weight: 800; letter-spacing: -0.005em; line-height: 1.15; white-space: nowrap; }
-.brand-card h1 i { font-style: normal; color: var(--copper); margin: 0 4px; }
-.brand-card h1 span { font-weight: 500; color: var(--text-muted); }
+.brand-card { display: flex; align-items: center; height: var(--ctl-h); padding: 0 22px; border-radius: 999px; }
+.brand-card h1 { font-size: 0.98rem; font-weight: 800; letter-spacing: -0.005em; line-height: 1; white-space: nowrap; }
 
 /* =========================
    TOP-RIGHT: LOCATION DISCOVERY (SEARCH + FILTER)
 ========================= */
 
-.discovery { position: absolute; z-index: 10; top: var(--gap); right: var(--gap); display: flex; align-items: center; gap: 8px; width: min(440px, calc(100vw - 2 * var(--gap) - var(--brand-w) - 12px)); }
+.discovery { position: absolute; z-index: 10; top: var(--gap); right: var(--gap); display: flex; flex-direction: column; align-items: flex-end; gap: 8px; width: min(560px, calc(100vw - 2 * var(--gap) - var(--brand-w) - 12px)); }
+.discovery-row { display: flex; align-items: center; gap: 8px; width: 100%; }
 .search-pill { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; height: var(--ctl-h); padding: 0 18px; border-radius: 999px; transition: border-color 200ms var(--ease), box-shadow 200ms var(--ease); }
 .search-pill:focus-within { border-color: var(--copper-soft); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 0 0 3px rgba(184, 115, 51, 0.18), 0 18px 48px rgba(0, 0, 0, 0.45); }
 .search-pill svg { color: var(--copper); }
@@ -85,7 +85,7 @@ svg { width: 18px; height: 18px; flex: 0 0 auto; fill: none; stroke: currentColo
 .filter-btn[aria-expanded="true"] { color: var(--text); border-color: var(--copper); }
 .filter-btn.is-filtered { color: var(--gold); border-color: rgba(241, 180, 52, 0.55); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 0 0 3px rgba(241, 180, 52, 0.14), 0 18px 48px rgba(0, 0, 0, 0.45); }
 .filter-dot { position: absolute; top: 8px; right: 8px; width: 8px; height: 8px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 0 2px rgba(18, 18, 20, 0.9); }
-.filter-menu { position: absolute; top: calc(100% + 8px); right: 0; min-width: 190px; padding: 6px; border-radius: var(--r-md); display: flex; flex-direction: column; }
+.filter-menu { position: absolute; z-index: 3; top: calc(100% + 8px); right: 0; min-width: 190px; padding: 6px; border-radius: var(--r-md); display: flex; flex-direction: column; }
 .filter-menu button { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; text-align: left; font-size: 0.86rem; color: var(--text-muted); }
 .filter-menu button:hover { background: rgba(255, 255, 255, 0.06); color: var(--text); }
 .filter-menu button[aria-checked="true"] { color: var(--text); background: rgba(184, 115, 51, 0.18); }
@@ -97,20 +97,20 @@ svg { width: 18px; height: 18px; flex: 0 0 auto; fill: none; stroke: currentColo
    LEFT PANEL (DIRECTORY + DETAILS)
 ========================= */
 
-.panel { width: min(380px, calc(100vw - 2 * var(--gap))); max-height: calc(100dvh - var(--panel-top) - var(--dock-clear) - var(--safe-b)); display: flex; flex-direction: column; border-radius: var(--r-lg); overflow: hidden; transition: width 260ms var(--ease), border-radius 260ms var(--ease), border-color 200ms var(--ease); }
-.panel.is-collapsed { width: 200px; border-radius: 999px; }
-.panel-toggle { display: flex; align-items: center; gap: 10px; width: 100%; padding: 13px 18px; text-align: left; transition: background 200ms var(--ease); }
-.panel-toggle:hover { background: rgba(255, 255, 255, 0.04); }
+.panel { width: min(380px, 100%); max-height: calc(100dvh - var(--panel-top) - var(--dock-clear) - var(--safe-b)); display: flex; flex-direction: column; border-radius: var(--r-lg); overflow: hidden; transition: width 260ms var(--ease), border-radius 260ms var(--ease), border-color 200ms var(--ease); }
+.panel.is-collapsed { display: none; }
+.panel-toggle { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; height: var(--ctl-h); padding: 0 16px 0 18px; border-radius: 999px; text-align: left; transition: color 200ms var(--ease), border-color 200ms var(--ease), transform 120ms var(--ease); }
+.panel-toggle:hover { border-color: var(--copper-soft); }
+.panel-toggle:active { transform: scale(0.97); }
+.panel-toggle[aria-expanded="true"] { border-color: var(--copper); }
 .panel-title { display: inline-flex; align-items: center; gap: 8px; font-size: 0.86rem; font-weight: 800; }
 .panel-title svg { color: var(--copper); transition: color 200ms var(--ease); }
-.panel-count { margin-left: auto; font-size: 0.74rem; color: var(--text-faint); white-space: nowrap; }
+.panel-count { margin-left: 8px; font-size: 0.68rem; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--text-faint); white-space: nowrap; }
 .chev { width: 16px; height: 16px; color: var(--copper); transition: transform 260ms var(--ease), color 200ms var(--ease); }
-.panel:not(.is-collapsed) { border-color: var(--copper-soft); }
+.panel { border-color: var(--copper-soft); }
 .panel-toggle[aria-expanded="true"] .panel-title svg, .panel-toggle[aria-expanded="true"] .chev { color: var(--gold); }
-.panel:not(.is-collapsed) .chev { transform: rotate(180deg); }
-.panel.is-collapsed .panel-count { display: none; }
-.panel.is-collapsed .chev { margin-left: auto; }
-.panel-body { display: flex; flex-direction: column; min-height: 0; flex: 1; border-top: 1px solid var(--hair); }
+.panel-toggle[aria-expanded="true"] .chev { transform: rotate(180deg); }
+.panel-body { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 .panel.is-collapsed .panel-body { display: none; }
 
 .info-card { flex: 0 1 auto; max-height: 58%; overflow-y: auto; }
@@ -138,11 +138,9 @@ svg { width: 18px; height: 18px; flex: 0 0 auto; fill: none; stroke: currentColo
 .route-chip:hover { background: rgba(241, 180, 52, 0.26); }
 .route-note, .empty, .panel-note { margin-top: 8px; font-size: 0.72rem; line-height: 1.45; color: var(--text-faint); }
 
-.dir-head { display: flex; justify-content: space-between; align-items: baseline; padding: 12px 18px 6px; font-size: 0.72rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint); border-top: 1px solid var(--hair); }
+.dir-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 12px 18px 6px; font-size: 0.72rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint); border-top: 1px solid var(--hair); }
 .dir-hint { font-weight: 500; letter-spacing: 0; text-transform: none; font-size: 0.68rem; }
 .directory-list { flex: 1 1 150px; min-height: 120px; overflow-y: auto; padding: 4px 10px 8px; }
-.directory-list::-webkit-scrollbar { width: 6px; }
-.directory-list::-webkit-scrollbar-thumb { background: var(--copper-soft); border-radius: 999px; }
 .dir-row { display: flex; align-items: center; gap: 4px; }
 .dir-item { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px; text-align: left; border: 1px solid transparent; transition: background 160ms var(--ease), border-color 160ms var(--ease); }
 .dir-item:hover { background: rgba(255, 255, 255, 0.05); }
@@ -192,31 +190,21 @@ svg { width: 18px; height: 18px; flex: 0 0 auto; fill: none; stroke: currentColo
 .tooltip p { color: var(--text-muted); font-size: 0.8rem; line-height: 1.45; }
 
 /* =========================
-   RESPONSIVE: TABLET
-========================= */
-
-@media (max-width: 960px) {
-  :root { --brand-w: 236px; }
-  .brand-card h1 { display: flex; flex-direction: column; gap: 2px; }
-  .brand-card h1 i { display: none; }
-  .brand-card h1 span { font-size: 0.68rem; }
-}
-
-/* =========================
    RESPONSIVE: MOBILE
 ========================= */
 
 @media (max-width: 720px) {
   :root { --gap: 12px; }
-  .panel.is-collapsed { width: 180px; }
   .info-card { max-height: 50%; }
 }
 
 @media (max-width: 560px) {
-  :root { --panel-top: calc(var(--gap) + 62px + var(--ctl-h) + 8px); }
-  .discovery { top: calc(var(--gap) + 52px + 8px); left: var(--gap); width: auto; }
-  .nav-left .panel { margin-top: calc(var(--ctl-h) + 8px); width: calc(100vw - 2 * var(--gap)); }
-  .nav-left .panel.is-collapsed { width: 180px; }
+  :root { --panel-top: calc(var(--gap) + var(--ctl-h) + 8px + var(--ctl-h) + 8px); }
+  .discovery { top: calc(var(--gap) + var(--ctl-h) + 8px); left: var(--gap); width: auto; }
+  .discovery-row { gap: 6px; }
+  .panel { width: 100%; }
+  .panel-toggle { gap: 6px; padding: 0 12px 0 14px; }
+  .search-pill { padding: 0 14px; gap: 8px; }
   .dock { gap: 8px; padding: 6px; overflow-x: auto; scrollbar-width: none; }
   .dock::-webkit-scrollbar { display: none; }
   .seg-btn { padding: 0 12px; }
@@ -226,4 +214,8 @@ svg { width: 18px; height: 18px; flex: 0 0 auto; fill: none; stroke: currentColo
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
+}
+
+@media (max-width: 400px) {
+  .panel-title svg { display: none; }
 }
