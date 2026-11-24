@@ -8,8 +8,7 @@ import { dom, reduceMotion, showToast } from "./dom.js";
    ===================================================================== */
 
 let ready = false;
-let renderer, scene, camera, controls, selRing, pathGroup;
-let selRingBase = 1;
+let renderer, scene, camera, controls, pathGroup;
 let fly = null;
 let lastFrame = 0;
 let hoverId = null;
@@ -874,14 +873,22 @@ function buildBoundary(b) {
 
 /* ---------- buildings, landmarks, boundary: merged per material, per-building meshes only for walls/roofs ---------- */
 const ALLPARTS = [];
+const LOC_GROUND_MATS = {};   // location id -> materials of its ground-level surfaces (court surfaces, running track), highlighted with the rest of the structure
 
 function buildCampus() {
   const GL = {}, rec = {};
-  const addBuilder = (b, group, mats) => {
-    Object.entries(b.arrays(M)).forEach(([key, G]) => {
-      if (key.startsWith("wall:") || key.startsWith("roof:")) {
+  const addBuilder = (b, group, mats, standalone = false) => {
+    const entries = Object.entries(b.arrays(M));
+    // A location with no wall or roof of its own (court, plaza, pool, tower, ...) keeps every surface as its own mesh instead of merging it
+    // into the shared campus meshes, so it can be highlighted on selection exactly like a building. Shadow flags match the merged meshes.
+    const whole = standalone && !entries.some(([key]) => key.startsWith("wall:") || key.startsWith("roof:"));
+    entries.forEach(([key, G]) => {
+      if (whole || key.startsWith("wall:") || key.startsWith("roof:")) {
         const mat = materialFor(key).clone(); mats.push(mat);
-        const mesh = new THREE.Mesh(makeGeo(G), mat); mesh.castShadow = mesh.receiveShadow = true; group.add(mesh);
+        const mesh = new THREE.Mesh(makeGeo(G), mat);
+        mesh.castShadow = whole ? key !== "fence" && key !== "water" && key !== "void" : true;
+        mesh.receiveShadow = whole ? key !== "fence" : true;
+        group.add(mesh);
       } else mergeInto(GL, key, G);
     });
   };
@@ -891,7 +898,7 @@ function buildCampus() {
     const sp = buildSpecial(b, id);
     parts.forEach((p) => ALLPARTS.push({ id, ...p }));
     const group = new THREE.Group(), mats = [];
-    addBuilder(b, group, mats);
+    addBuilder(b, group, mats, true);
     scene.add(group);
     rec[id] = { group, mats, parts, sp };
   });
@@ -992,7 +999,7 @@ function addOvalGroundBand(cx, cy, outerRx, outerRy, innerRx, innerRy, materialK
   return mesh;
 }
 
-function addCourtSurface(cx, cy, widthPx, depthPx, rotation, isTennis = false) {
+function addCourtSurface(cx, cy, widthPx, depthPx, rotation, isTennis = false, locId = 0) {
   const center = groundWorldPoint(cx, cy, 0.035);
   const group = new THREE.Group();
   group.position.copy(center);
@@ -1000,6 +1007,7 @@ function addCourtSurface(cx, cy, widthPx, depthPx, rotation, isTennis = false) {
   group.rotation.y = -(rotation || 0) * Math.PI / 180;
   const geo = new THREE.PlaneGeometry(widthPx * WORLD_W / IMAGE_WIDTH, depthPx * WORLD_W / IMAGE_WIDTH);
   const mat = new THREE.MeshStandardMaterial({ map: makeCourtTexture(isTennis), roughness: 0.94, metalness: 0, side: THREE.DoubleSide });
+  if (locId) (LOC_GROUND_MATS[locId] = LOC_GROUND_MATS[locId] || []).push(mat);
   const surface = new THREE.Mesh(geo, mat);
   surface.rotation.x = -Math.PI / 2;
   surface.receiveShadow = true;
@@ -1052,9 +1060,11 @@ function buildGround() {
   scene.add(outer);
 
   // Main oval athletics track. The superellipse follows the existing fence alignment.
-  addOvalGroundBand(668, 672, 420, 98, 394, 72, "track", 0.022);
-  addOvalGroundBand(668, 672, 414.5, 92.5, 412.5, 90.5, "trackMark", 0.024);
-  addOvalGroundBand(668, 672, 401.5, 79.5, 399.5, 77.5, "trackMark", 0.024);
+  LOC_GROUND_MATS[17] = [   // the track belongs to location 17 (Oval): each band gets its own material copy so it can be highlighted
+    addOvalGroundBand(668, 672, 420, 98, 394, 72, "track", 0.022),
+    addOvalGroundBand(668, 672, 414.5, 92.5, 412.5, 90.5, "trackMark", 0.024),
+    addOvalGroundBand(668, 672, 401.5, 79.5, 399.5, 77.5, "trackMark", 0.024)
+  ].map((mesh) => (mesh.material = mesh.material.clone()));
 
   // Preserve the two surveyed-from-photo wall runs as separate road segments;
   // flattening them would incorrectly bridge the visible campus entrance gap.
@@ -1071,7 +1081,7 @@ function buildGround() {
   });
 
   // Court surfaces use the same dimensions, centers, and rotations as their fences.
-  COURT_LAYOUT.forEach((court) => addCourtSurface(court.x, court.y, court.w, court.d, court.rot, court.kind === "tennis"));
+  COURT_LAYOUT.forEach((court) => addCourtSurface(court.x, court.y, court.w, court.d, court.rot, court.kind === "tennis", court.id));
 
   // Light, low-profile paved aprons and short entrance walks are derived from the building footprints.
   addBuildingGroundPads();
@@ -1318,40 +1328,88 @@ function addTrees() {
 // golden-hour sun from the south-east (matches the light in the aerial photo)
 const PIN_PX = 26;
 
-/* ---------- location markers: compact numbered badges with a pointer tip, constant on-screen size ---------- */
-function makePinTexture(loc, st) {
-  const lm = categoryOf(loc) === "landmark", W = 128, H = 160, c = cvs(W, H), g = c.getContext("2d"), cx = 64, cy = 62, r = 46;
-  const fill = lm ? (st === "idle" ? "#f1b434" : "#ffc94d") : (st === "idle" ? "#7a0000" : "#9a1212");
-  const edge = lm ? "#7a0000" : "#f1b434", ink = lm ? "#3a0a0a" : "#ffffff";
-  g.shadowColor = "rgba(0,0,0,0.55)"; g.shadowBlur = 9; g.shadowOffsetY = 4;
-  g.fillStyle = fill; g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.fill();
-  g.beginPath(); g.moveTo(cx - 24, cy + 36); g.lineTo(cx + 24, cy + 36); g.lineTo(cx, 154); g.closePath(); g.fill();
-  g.shadowColor = "transparent";
-  g.lineWidth = st === "idle" ? 5 : 7; g.strokeStyle = st === "idle" ? edge : st === "active" ? "#ffffff" : "#ffe9a8";
+/* ---------- location markers: compact glass badges with a pointer tip, constant on-screen size ----------
+   A sprite cannot blur what is behind it, so the glass look is built from a translucent tinted body (0.78 alpha at rest),
+   a soft top-left sheen, an inner rim light and a diffused shadow that is cut out under the body so the glass stays see-through.
+   Hover and selected are continuous levels (0..1) that ease toward their target each frame, so the border, glow and
+   opacity change smoothly instead of swapping between textures. Category identity is unchanged: gold badges carry a
+   red rim, red badges carry a gold rim. */
+const PIN_GLASS = {
+  landmark: { top: [255, 216, 112], bottom: [232, 160, 24], litTop: [255, 233, 156], litBottom: [247, 183, 44], shade: [120, 60, 0], edge: [122, 0, 0], edgeLit: [176, 28, 28], glow: [255, 201, 77], ink: "#3a0a0a" },
+  academic: { top: [160, 34, 32], bottom: [100, 4, 4], litTop: [190, 46, 44], litBottom: [130, 14, 14], shade: [30, 0, 0], edge: [241, 180, 52], edgeLit: [255, 214, 110], glow: [224, 48, 48], ink: "#ffffff" }
+};
+const mixRgb = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
+const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+
+/* Draws one pin into its canvas. h = hover level, a = selected level (both 0..1). */
+function drawPin(c, loc, h, a) {
+  const lm = categoryOf(loc) === "landmark", P = PIN_GLASS[lm ? "landmark" : "academic"], g = c.getContext("2d");
+  const cx = 64, cy = 62, r = 46, lit = Math.min(1, 0.45 * h + a), alpha = Math.min(0.96, 0.78 + 0.06 * h + 0.16 * a);
+  const body = new Path2D();                                  // one path (circle + tip) so the translucent fill never double-blends
+  body.arc(cx, cy, r, 0, Math.PI * 2); body.moveTo(cx - 24, cy + 36); body.lineTo(cx + 24, cy + 36); body.lineTo(cx, 154); body.closePath();
+  g.clearRect(0, 0, c.width, c.height);
+
+  /* diffused drop shadow, plus a restrained tinted glow when hovered / selected; the body is then cut out of both */
+  g.save(); g.fillStyle = "#000";
+  g.shadowColor = `rgba(0,0,0,${0.34 + 0.14 * a})`; g.shadowBlur = 12 + 3 * a; g.shadowOffsetY = 5 + 2 * a; g.fill(body);
+  const glow = 0.5 * h + 0.4 * a;
+  if (glow > 0.01) { g.shadowColor = rgba(P.glow, glow); g.shadowBlur = 13; g.shadowOffsetY = 0; g.fill(body); }
+  g.restore();
+  g.globalCompositeOperation = "destination-out"; g.fillStyle = "#000"; g.fill(body); g.globalCompositeOperation = "source-over";
+
+  /* tinted glass body: lighter top-left, deeper bottom-right */
+  const fillG = g.createLinearGradient(cx - 34, cy - 40, cx + 30, 154);
+  fillG.addColorStop(0, rgba(mixRgb(P.top, P.litTop, lit), alpha)); fillG.addColorStop(1, rgba(mixRgb(P.bottom, P.litBottom, lit), alpha));
+  g.fillStyle = fillG; g.fill(body);
+
+  const w = 5 + h + 2 * a;                                    // outer rim width grows slightly with hover / selection
+  g.save(); g.clip(body);
+  const shade = g.createRadialGradient(cx - 14, cy - 18, r * 0.5, cx - 14, cy - 18, r * 1.5);   // soft depth toward the lower right
+  shade.addColorStop(0, rgba(P.shade, 0)); shade.addColorStop(1, rgba(P.shade, 0.22));
+  g.fillStyle = shade; g.fillRect(0, 0, c.width, c.height);
+  g.save(); g.translate(cx - 8, cy - 24); g.rotate(-0.45); g.beginPath(); g.ellipse(0, 0, 34, 19, 0, 0, Math.PI * 2);   // top-left specular sheen
+  const sheen = g.createLinearGradient(0, -19, 0, 19);
+  sheen.addColorStop(0, `rgba(255,255,255,${0.34 + 0.1 * lit})`); sheen.addColorStop(1, "rgba(255,255,255,0.02)");
+  g.fillStyle = sheen; g.fill(); g.restore();
+  const rim = g.createLinearGradient(cx - r, cy - r, cx + r, cy + r);                           // inner rim light, strongest top-left
+  rim.addColorStop(0, "rgba(255,255,255,0.8)"); rim.addColorStop(0.55, "rgba(255,255,255,0.18)"); rim.addColorStop(1, "rgba(255,255,255,0.06)");
+  g.lineWidth = 3; g.strokeStyle = rim; g.beginPath(); g.arc(cx, cy, r - w / 2 - 1.8, 0, Math.PI * 2); g.stroke();
+  g.restore();
+
+  /* outer rim: category contrast colour at rest, brighter on hover, white when selected (with the inner category ring) */
+  g.lineWidth = w; g.strokeStyle = rgba(mixRgb(mixRgb(P.edge, P.edgeLit, h), [255, 255, 255], a), 0.94);
   g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.stroke();
-  if (st === "active") { g.lineWidth = 4; g.strokeStyle = edge; g.beginPath(); g.arc(cx, cy, r - 8, 0, Math.PI * 2); g.stroke(); }
-  g.fillStyle = ink; g.font = `800 ${String(loc.id).length > 1 ? 52 : 62}px Manrope, Arial, sans-serif`; g.textAlign = "center"; g.textBaseline = "middle";
-  g.fillText(String(loc.id), cx, cy + 3);
+  if (a > 0.01) { g.lineWidth = 4; g.strokeStyle = rgba(P.edge, a); g.beginPath(); g.arc(cx, cy, r - 9, 0, Math.PI * 2); g.stroke(); }
+
+  /* number, drawn last so the sheen never sits on top of it */
+  g.save(); g.fillStyle = P.ink; g.font = `700 ${String(loc.id).length > 1 ? 52 : 62}px Manrope, Arial, sans-serif`; g.textAlign = "center"; g.textBaseline = "middle";
+  if (!lm) { g.shadowColor = "rgba(0,0,0,0.4)"; g.shadowBlur = 4; g.shadowOffsetY = 2; }
+  g.fillText(String(loc.id), cx, cy + 3); g.restore();
+}
+
+function makePinTexture(loc) {
+  const c = cvs(128, 160);
+  drawPin(c, loc, 0, 0);
   const t = new THREE.CanvasTexture(c); t.encoding = THREE.sRGBEncoding; t.anisotropy = MAX_ANISO;
   return t;
 }
 
 function buildPin(loc, anchorY) {
   const group = new THREE.Group(), spriteMat = new THREE.SpriteMaterial({ transparent: true, depthWrite: false });
-  const tex = { idle: makePinTexture(loc, "idle") };
-  spriteMat.map = tex.idle;
+  const tex = makePinTexture(loc);
+  spriteMat.map = tex;
   const sprite = new THREE.Sprite(spriteMat);
   sprite.center.set(0.5, 0); sprite.renderOrder = 10; sprite.userData.id = loc.id;
   group.add(sprite);
-  return { group, sprite, spriteMat, tex, state: "idle" };
+  return { group, sprite, spriteMat, tex, lvl: { h: 0, a: 0 }, tgt: { h: 0, a: 0 }, state: "idle" };
 }
 
+/* Sets the target hover / selected levels; the render loop eases toward them and redraws only while they change. */
 function applyPinTexture(p, loc) {
   const st = loc.id === state.activeId ? "active" : loc.id === hoverId ? "hover" : "idle";
   if (p.state === st) return;
   p.state = st;
-  p.spriteMat.map = p.tex[st] || (p.tex[st] = makePinTexture(loc, st));
-  p.spriteMat.needsUpdate = true;
+  p.tgt.h = st === "hover" ? 1 : 0; p.tgt.a = st === "active" ? 1 : 0;
   p.spriteMat.depthTest = st !== "active";
 }
 
@@ -1437,9 +1495,6 @@ export function updateVisualState() {
     applyPinTexture(p, locById.get(id));
     p.build.mats.forEach((m) => m.emissive && m.emissive.setHex(isA ? 0x3a2208 : 0));
   });
-  const a = pins.get(state.activeId);
-  selRing.position.set(a.base.x, 0.1, a.base.z);
-  selRingBase = a.radius / 2.28;
   rebuildPaths();
 }
 
@@ -1762,13 +1817,9 @@ export function initScene({ onSelectLocation }) {
     pin.group.position.set(base.x, (anchor + 0.5) * M, base.z);
     scene.add(pin.group);
     pickables.push(pin.sprite);
-    const dims = r.parts.length ? Math.max(...r.parts.map((pt) => Math.max(pt.w, pt.d))) : r.sp ? 10 : 6;
-    pins.set(loc.id, { ...pin, build: { mats: r.mats }, base, worldPos: pin.group.position, topY: anchor * M, scale: 1, targetScale: 1, opacity: 1, targetOpacity: 1, collapsed: false, keep: false, radius: Math.min(Math.max(dims * 0.4 * M, 1.6), 9) });
+    pins.set(loc.id, { ...pin, build: { mats: r.mats.concat(LOC_GROUND_MATS[loc.id] || []) }, base, worldPos: pin.group.position, topY: anchor * M, scale: 1, targetScale: 1, opacity: 1, targetOpacity: 1, collapsed: false, keep: false });
   });
 
-  selRing = new THREE.Mesh(new THREE.RingGeometry(2.1, 2.45, 48).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xf1b434, transparent: true, opacity: 0.9, depthTest: false }));
-  selRing.renderOrder = 4;
-  scene.add(selRing);
   pathGroup = new THREE.Group();
   scene.add(pathGroup);
 
@@ -1850,6 +1901,14 @@ export function animate(now) {
   if (overlapFrame++ % 6 === 0) resolvePinOverlap();
   pins.forEach((p, id) => {
     const tgt = p.collapsed && !p.keep && id !== hoverId ? 0.45 : targetOf(p, id);
+    const L = p.lvl, T = p.tgt;
+    if (L.h !== T.h || L.a !== T.a) {                         // glass pin: ease hover / selected levels and redraw only while they change
+      const kp = reduceMotion ? 1 : k;
+      L.h += (T.h - L.h) * kp; L.a += (T.a - L.a) * kp;
+      if (Math.abs(T.h - L.h) < 0.01) L.h = T.h;
+      if (Math.abs(T.a - L.a) < 0.01) L.a = T.a;
+      drawPin(p.tex.image, locById.get(id), L.h, L.a); p.tex.needsUpdate = true;
+    }
     p.scale += (tgt - p.scale) * k;
     const dist = camera.position.distanceTo(p.worldPos), sz = dist * perPx * PIN_PX * p.scale;
     p.sprite.scale.set(sz, sz * 1.25, 1);
@@ -1859,8 +1918,6 @@ export function animate(now) {
   });
   if (state.mode === "walking") { setShadowFrustum(controls.target, 46); shadowLocal = true; }
   else if (shadowLocal) { setShadowFrustum(new THREE.Vector3(8, 0, 8), 112); shadowLocal = false; }
-  const pulse = 1 + 0.1 * Math.sin(now / 380);
-  selRing.scale.set(pulse * selRingBase, 1, pulse * selRingBase);
   pathTextures.forEach((t) => { t.offset.x -= dt * 0.9; });
 
   renderer.render(scene, camera);
