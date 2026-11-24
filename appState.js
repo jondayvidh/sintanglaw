@@ -8,7 +8,7 @@
 import { categoryOf } from "./locations.js";
 
 export const DEFAULT_ACTIVE_ID = 1;
-export const DEFAULT_DEST_IDS = [20];
+export const DEFAULT_DEST_IDS = [];
 export const MAX_DESTINATIONS = 3;
 
 export const state = {
