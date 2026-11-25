@@ -112,6 +112,20 @@ function makeProceduralGrassTexture(repeatX = 11, repeatY = 6) {
   return t;
 }
 
+function makeGroundPatchTexture() {
+  const c = cvs(1024, 560), g = c.getContext("2d"), rnd = seeded(913);
+  [["58,84,36", 0.34, 70, 150], ["182,160,96", 0.26, 60, 130], ["126,156,76", 0.2, 50, 120]].forEach(([rgb, a, n, rMax]) => {
+    for (let i = 0; i < n; i++) {
+      const x = rnd() * c.width, y = rnd() * c.height, r = 40 + rnd() * rMax, gr = g.createRadialGradient(x, y, 0, x, y, r);
+      gr.addColorStop(0, `rgba(${rgb},${a * (0.5 + rnd() * 0.5)})`); gr.addColorStop(1, `rgba(${rgb},0)`);
+      g.fillStyle = gr; g.save(); g.translate(x, y); g.scale(1, 0.62); g.translate(-x, -y); g.fillRect(x - r, y - r, r * 2, r * 2); g.restore();
+    }
+  });
+  const t = new THREE.CanvasTexture(c);
+  t.encoding = THREE.sRGBEncoding; t.anisotropy = MAX_ANISO;
+  return t;
+}
+
 function makeCourtTexture(isTennis = false) {
   const c = document.createElement("canvas");
   c.width = 512; c.height = 256;
@@ -300,13 +314,14 @@ function surfTex(name) {
   if (TEX["s:" + name]) return TEX["s:" + name];
   const S = 256, rnd = seeded(name.length * 313 + name.charCodeAt(1) * 17);
   const P = {   // name: [base colour, roughness, speckle]
-    concrete: ["#b7b3aa", 225, 900], pavement: ["#a9a79e", 238, 1200], asphalt: ["#424741", 245, 2100], track: ["#765344", 220, 900], trackMark: ["#b08a6c", 205, 240], concreteWhite: ["#dcd9d2", 215, 600], plinth: ["#7d7a73", 230, 900], trim: ["#e7e4dc", 215, 400], canopy: ["#d0ccc2", 215, 500], column: ["#cdc8be", 215, 400],
+    concrete: ["#b7b3aa", 225, 900], pavement: ["#a9a79e", 238, 1200], track: ["#765344", 220, 900], trackMark: ["#b08a6c", 205, 240], concreteWhite: ["#dcd9d2", 215, 600], plinth: ["#7d7a73", 230, 900], trim: ["#e7e4dc", 215, 400], canopy: ["#d0ccc2", 215, 500], column: ["#cdc8be", 215, 400],
     columnred: ["#8f2a22", 200, 300], slab: ["#d9d5cc", 215, 400], ceiling: ["#8e8a84", 235, 500], soffit: ["#b8afa2", 235, 500], roofflat: ["#6f6d68", 240, 1800], stagefloor: ["#8a857c", 220, 700],
     stepconcrete: ["#a9a69f", 225, 700], seat: ["#52667a", 160, 500], coping: ["#cfcbc2", 200, 400], curb: ["#a7a49c", 230, 700], tower: ["#9b9a95", 235, 1100], obelisk: ["#ecebe5", 210, 200],
     muralwall: ["#c0604a", 225, 700], wallred: ["#a8372e", 220, 600], pylon: ["#e3e0d6", 190, 300], signplate: ["#4a4034", 150, 200], wood: ["#7a5a3a", 215, 500], darkstone: ["#3b3b39", 215, 600],
     stone: ["#8d8a80", 225, 1200], tile: ["#2f86a8", 120, 300], deckpink: ["#b97a6b", 200, 600], courtred: ["#c0562f", 215, 700], pavers: ["#a88f84", 215, 600], brick: ["#a04a38", 215, 400],
     backboard: ["#f2f2ee", 150, 100], metal: ["#8d9296", 120, 200], solar: ["#1b2a4a", 90, 100], rail: ["#7a2f27", 190, 200], whitefence: ["#f0eee8", 190, 100], door: ["#18222a", 70, 0], glassdoor: ["#18222a", 70, 0],
     skyglass: ["#1d2d38", 60, 0], water: ["#5fb6c0", 40, 0], void: ["#1c2125", 240, 0], relief: ["#3a3832", 170, 500],
+    asphalt: ["#454548", 236, 1800], roadline: ["#ece7d6", 200, 100], roadyellow: ["#e2ad2e", 200, 100],
   }[name] || ["#b0aca3", 225, 500];
   const SW = name === "signplate" ? 520 : S, SH = name === "signplate" ? 180 : S;
   const T = triCanvas(SW, SH, P[0], 128, P[1]), { m, bm, rm, R } = T;
@@ -449,6 +464,16 @@ class MeshBuilder {
     ends.forEach(([a, b, c]) => this.tri(key, a, b, c, [[0, 0], [2 * D / tile, 0], [D / tile, sl / tile]], 1));
     const sk = soffitKey || key;
     this.quad(sk, P(-W, y0, -D), P(W, y0, -D), P(W, y0, D), P(-W, y0, D), [[0, 0], [2 * W / tile, 0], [2 * W / tile, 2 * D / tile], [0, 2 * D / tile]], 0.55);
+    const eave = [[-W, D], [W, D], [W, -D], [-W, -D]], thatch = key === "roof:thatch";           // fascia board: gives the eave a visible thickness and a crisp shadow line (not on thatch)
+    for (let k = 0; k < 4 && !thatch; k++) {
+      const [ua, va] = eave[k], [ub, vb] = eave[(k + 1) % 4], el = Math.hypot(ub - ua, vb - va);
+      this.quad("trim", P(ua, y0 - 0.22, va), P(ub, y0 - 0.22, vb), P(ub, y0 + 0.07, vb), P(ua, y0 + 0.07, va), [[0, 0], [el / 2, 0], [el / 2, 0.15], [0, 0.15]], 1);
+    }
+    if (ridge > 0.6 && !thatch) {                                                               // ridge cap
+      const rl = 2 * ridge + 0.6;
+      if (alongX) this.box(key, cx, cz, rl, 0.34, y1 - 0.04, y1 + 0.2, 1.2, 1.2, { ao: 1 });
+      else this.box(key, cx, cz, 0.34, rl, y1 - 0.04, y1 + 0.2, 1.2, 1.2, { ao: 1 });
+    }
     return y1;
   }
   /* barrel (arched) roof; axis along local x, arc across z; chord = wid, sagitta = rise */
@@ -582,6 +607,10 @@ function buildBlock(b, p, seed = 1) {
   if (p.bands !== false && p.floors > 1) for (let f = 1; f < p.floors; f++) b.box("trim", 0, 0, W + 0.28, D + 0.28, f * fh - 0.14, f * fh + 0.14, 2, 1, { ao: 1 });
   b.box("trim", 0, 0, W + 0.5, D + 0.5, H - 0.1, H + 0.32, 2, 1, { ao: 1 });                         // cornice / roof edge beam
   // pilasters (corner / bay piers)
+  if (!p.pilasters && p.floors >= 2 && p.style !== "kubo") {                          // slim corner piers give every multi-storey block a defined edge
+    const ck = "pier:" + hex();
+    [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sz]) => b.box(ck, sx * W / 2, sz * D / 2, 0.7, 0.7, y0, H, 1, 1, { ao: 0.85 }));
+  }
   if (p.pilasters) {
     const pw = p.pilasters.w || 0.7, key = "pier:" + hex(p.pilasters.color), step = p.pilasters.every || 0;
     const xs = [-W / 2 + pw / 2, W / 2 - pw / 2];
@@ -631,7 +660,12 @@ function buildBlock(b, p, seed = 1) {
     b.box(pk, 0, -D / 2 + 0.15, W, 0.3, H + 0.3, H + 0.3 + ph, 3, 1, { ao: 1 });
     b.box(pk, W / 2 - 0.15, 0, 0.3, D - 0.6, H + 0.3, H + 0.3 + ph, 3, 1, { ao: 1 });
     b.box(pk, -W / 2 + 0.15, 0, 0.3, D - 0.6, H + 0.3, H + 0.3 + ph, 3, 1, { ao: 1 });
-    top = H + 0.3 + ph;
+    const cpY = H + 0.3 + ph;                                            // coping stones cap the parapet and catch the low sun
+    b.box("coping", 0, D / 2 - 0.15, W + 0.1, 0.46, cpY, cpY + 0.1, 2, 1, { ao: 1 });
+    b.box("coping", 0, -D / 2 + 0.15, W + 0.1, 0.46, cpY, cpY + 0.1, 2, 1, { ao: 1 });
+    b.box("coping", W / 2 - 0.15, 0, 0.46, D - 0.5, cpY, cpY + 0.1, 2, 1, { ao: 1 });
+    b.box("coping", -W / 2 + 0.15, 0, 0.46, D - 0.5, cpY, cpY + 0.1, 2, 1, { ao: 1 });
+    top = cpY + 0.1;
     if (r.inner) {                                                       // inset maroon hip inside the parapet (Ninoy Aquino LRC)
       const iw = W - 5, id = D - 5;
       if (iw > 4 && id > 3) top = Math.max(top, b.hipRoof("roof:maroon", 0, 0, iw, id, H + 0.3, Math.min(id * 0.3, 2.4), 0.4, undefined, 1.2, "soffit"));
@@ -853,8 +887,8 @@ function buildSpecial(b, id) {
   }
 }
 
-function buildBoundary(b) {
-  STREET_WALL.forEach((run) => {
+function buildBoundary(b, runs = STREET_WALL, curb = true) {
+  runs.forEach((run) => {
     for (let k = 0; k < run.length - 1; k++) {
       const [x0, z0] = pxToM(...run[k]), [x1, z1] = pxToM(...run[k + 1]);
       b.place(0, 0, 0);
@@ -864,7 +898,7 @@ function buildBoundary(b) {
       b.wall("wallred", B[0], B[1], A[0], A[1], 0, 1.35, 3, 1.35);                  // outward faces (both sides)
       b.wall("wallred", D[0], D[1], C[0], C[1], 0, 1.35, 3, 1.35);
       b.quad("concrete", [A[0], 1.35, A[1]], [D[0], 1.35, D[1]], [C[0], 1.35, C[1]], [B[0], 1.35, B[1]], [[0, 0], [0, 1], [len / 3, 1], [len / 3, 0]], 1);
-      b.quad("curb", [x0 + nx * 0.2, 0.17, z0 + nz * 0.2], [x0 + nx * 0.7, 0.17, z0 + nz * 0.7], [x1 + nx * 0.7, 0.17, z1 + nz * 0.7], [x1 + nx * 0.2, 0.17, z1 + nz * 0.2], [[0, 0], [1, 0], [1, len / 3], [0, len / 3]], 1);
+      if (curb) b.quad("curb", [x0 + nx * 0.2, 0.17, z0 + nz * 0.2], [x0 + nx * 0.7, 0.17, z0 + nz * 0.7], [x1 + nx * 0.7, 0.17, z1 + nz * 0.7], [x1 + nx * 0.2, 0.17, z1 + nz * 0.2], [[0, 0], [1, 0], [1, len / 3], [0, len / 3]], 1);
       const n = Math.floor(len / 14);
       for (let q = 0; q <= n; q++) { const px = x0 + dx * (q * 14), pz = z0 + dz * (q * 14); if (q * 14 <= len) b.box("concrete", px, pz, 0.6, 0.6, 0, 1.75, 1, 1, { ao: 0.85 }); }
     }
@@ -905,7 +939,8 @@ function buildCampus() {
   const ctx = new MeshBuilder();
   CONTEXT_BLOCKS.forEach((p, i) => { const r = buildBlock(ctx, p, 9000 + i); ALLPARTS.push({ id: 0, ...r }); });
   { const [x, z] = pxToM(562, 114); ctx.place(x, z, 0); for (let k = -2; k <= 2; k++) ctx.box("concreteWhite", k * 5.5, 56 * METERS_PER_PX / 2 + 2.2, 0.9, 0.9, 0, 14.5, 2, 2, { ao: 0.9 }); ctx.box("concreteWhite", 0, 56 * METERS_PER_PX / 2 + 2.2, 28, 1.6, 14.5, 15.6, 3, 3, { ao: 1 }); }
-  buildBoundary(ctx);
+  buildBoundary(ctx, STREET_WALL, false);                                   // the street side is finished by buildStreet (sidewalk, road); the other sides follow the same wall
+  buildBoundary(ctx, PERIMETER_RUNS, false);
   { const rn = (a) => pxToM(668 + 428 * Math.sign(Math.cos(a)) * Math.pow(Math.abs(Math.cos(a)), 0.74), 672 + 105 * Math.sign(Math.sin(a)) * Math.pow(Math.abs(Math.sin(a)), 0.74));
     ctx.place(0, 0, 0); let prev = null;                                      // white post-and-rail fence round the running track (visible in the aerial photo)
     for (let k = 0; k <= 64; k++) { const a = Math.PI * 0.9 + ((Math.PI * 1.45) * k) / 64, pt = rn(a); if (prev) railRun(ctx, prev[0], prev[1], pt[0], pt[1]); prev = pt; } }
@@ -1041,7 +1076,7 @@ function addBuildingGroundPads() {
   CONTEXT_BLOCKS.forEach(addPad);
 }
 
-/* ---------- procedural campus ground: terrain, road, track, courts and walkways ---------- */
+/* ---------- procedural campus ground: terrain, track, courts and walkways ---------- */
 function buildGround() {
   // Neutral, procedurally textured terrain replaces the baked aerial photograph.
   const grassMap = makeProceduralGrassTexture(11, 6);
@@ -1059,26 +1094,17 @@ function buildGround() {
   outer.receiveShadow = true;
   scene.add(outer);
 
+  // Large soft tonal patches (fresher and drier grass) break up the repeating lawn tile so the ground reads as living turf.
+  const patches = new THREE.Mesh(new THREE.PlaneGeometry(WORLD_W, WORLD_H), new THREE.MeshStandardMaterial({ map: makeGroundPatchTexture(), transparent: true, roughness: 1, metalness: 0, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
+  patches.rotation.x = -Math.PI / 2; patches.position.y = 0.004; patches.receiveShadow = true; patches.renderOrder = 1;
+  scene.add(patches);
+
   // Main oval athletics track. The superellipse follows the existing fence alignment.
   LOC_GROUND_MATS[17] = [   // the track belongs to location 17 (Oval): each band gets its own material copy so it can be highlighted
     addOvalGroundBand(668, 672, 420, 98, 394, 72, "track", 0.022),
     addOvalGroundBand(668, 672, 414.5, 92.5, 412.5, 90.5, "trackMark", 0.024),
     addOvalGroundBand(668, 672, 401.5, 79.5, 399.5, 77.5, "trackMark", 0.024)
   ].map((mesh) => (mesh.material = mesh.material.clone()));
-
-  // Preserve the two surveyed-from-photo wall runs as separate road segments;
-  // flattening them would incorrectly bridge the visible campus entrance gap.
-  STREET_WALL.forEach((wallRun) => {
-    const street = wallRun.map(([x, y], i) => {
-      const prev = wallRun[Math.max(0, i - 1)], next = wallRun[Math.min(wallRun.length - 1, i + 1)];
-      const dx = next[0] - prev[0], dy = next[1] - prev[1], len = Math.hypot(dx, dy) || 1;
-      let nx = -dy / len, ny = dx / len;
-      if (ny < 0) { nx *= -1; ny *= -1; }
-      return [x + nx * 34, y + ny * 34];
-    });
-    addGroundRibbon(street, 82, "pavement", 0.014);
-    addGroundRibbon(street, 70, "asphalt", 0.022);
-  });
 
   // Court surfaces use the same dimensions, centers, and rotations as their fences.
   COURT_LAYOUT.forEach((court) => addCourtSurface(court.x, court.y, court.w, court.d, court.rot, court.kind === "tennis", court.id));
@@ -1207,28 +1233,302 @@ function runSpatialAudit() {
 }
 
 /* =====================================================================
+   Street, surroundings and campus trails
+   ===================================================================== */
+
+const MPP = METERS_PER_PX;
+const CAMPUS_HALF = [(IMAGE_WIDTH * MPP) / 2, (IMAGE_HEIGHT * MPP) / 2];                       // half extents of the mapped campus, in metres
+const mToPx = (x, z) => [x / MPP + IMAGE_WIDTH / 2, z / MPP + IMAGE_HEIGHT / 2];
+
+/* Anonas Street frame: local x (u) runs along the boundary wall, local z (v) points out across the street. The wall itself is at v = 0. */
+const ST = (() => {
+  const run = STREET_WALL[STREET_WALL.length - 1], a = pxToM(...STREET_WALL[0][0]), b = pxToM(...run[run.length - 1]);
+  const len = Math.hypot(b[0] - a[0], b[1] - a[1]), dx = (b[0] - a[0]) / len, dz = (b[1] - a[1]) / len;
+  return { ox: a[0], oz: a[1], dx, dz, nx: -dz, nz: dx, deg: (Math.atan2(dz, dx) * 180) / Math.PI };
+})();
+const stToWorld = (u, v) => [ST.ox + ST.dx * u + ST.nx * v, ST.oz + ST.dz * u + ST.nz * v];
+const stFromWorld = (x, z) => { const rx = x - ST.ox, rz = z - ST.oz; return [rx * ST.dx + rz * ST.dz, rx * ST.nx + rz * ST.nz]; };
+
+/* The same red-and-white wall continues round the rest of the campus (photo pixels, just inside the mapped area). It joins the street wall at both ends. */
+const PERIMETER_RUNS = [[[1694, 569], [1694, 4], [4, 4], [4, 922], [403, 922], [440, 912]]];
+const GATE_U = [168, 206];                                                                       // the gate opening in the street wall (the Pylon and the Mural stand in it)
+const URBAN_TREES = [];                                                                          // trees (metres) contributed by the street, boundary and surroundings; planted by addTrees
+const createdTrails = [];                                                                        // trail segments in photo px, kept clear of new trees
+
+/* ---------- Anonas Street: sidewalks, roadway, markings, lamps, street trees, gate forecourt ---------- */
+function buildStreet(b) {
+  b.place(ST.ox, ST.oz, ST.deg);
+  const U0 = -560, U1 = 820;
+  const slab = (key, u0, u1, v0, v1, y1, tile) => b.box({ wall: "curb", top: key }, (u0 + u1) / 2, (v0 + v1) / 2, u1 - u0, v1 - v0, -0.15, y1, tile, tile, { ao: 1, rtw: tile, rth: tile });
+  slab("pavement", U0, GATE_U[0], 0.2, 3.3, 0.2, 3); slab("pavement", GATE_U[1], U1, 0.2, 3.3, 0.2, 3);   // inner sidewalk, split at the gate
+  slab("pavers", GATE_U[0], GATE_U[1], -6, 3.3, 0.06, 2);                                                   // paved forecourt through the gate
+  slab("asphalt", U0, U1, 3.3, 16.1, 0.05, 6);                                                              // roadway
+  slab("pavement", U0, U1, 16.1, 19.4, 0.2, 3);                                                             // far sidewalk
+  const line = (key, u0, u1, v0, v1) => b.top(key, u0, v0, u1, v1, 0.06, 4, 4);
+  const zebra = [181, 193];
+  line("roadline", U0, U1, 3.65, 3.8); line("roadline", U0, U1, 15.6, 15.75);                              // edge lines
+  line("roadyellow", U0, zebra[0] - 1, 9.55, 9.69); line("roadyellow", U0, zebra[0] - 1, 9.71, 9.85);        // double centre line
+  line("roadyellow", zebra[1] + 1, U1, 9.55, 9.69); line("roadyellow", zebra[1] + 1, U1, 9.71, 9.85);
+  for (let u = U0; u < U1; u += 9) if (u < zebra[0] - 4 || u > zebra[1] + 1) { line("roadline", u, u + 3, 6.4, 6.52); line("roadline", u, u + 3, 12.9, 13.02); }   // lane dashes
+  for (let k = 0; k < 12; k++) line("roadline", zebra[0] + k, zebra[0] + k + 0.5, 4.1, 15.3);              // pedestrian crossing at the gate
+  for (let u = U0 + 14; u < U1; u += 28) {                                                                  // street lamps, one side each, staggered
+    if (u > GATE_U[0] - 6 && u < GATE_U[1] + 6) continue;
+    b.cyl("metal", u, 18.5, 0.1, 0.07, 0.2, 7.4, 8, 2, false);
+    b.box("metal", u, 17.7, 0.1, 1.7, 7.25, 7.37, 1, 1, { ao: 1 }); b.box("canopy", u, 16.9, 0.4, 0.9, 7.1, 7.28, 1, 1, { ao: 1 });
+    const u2 = u + 14;
+    if (u2 > GATE_U[0] - 6 && u2 < GATE_U[1] + 6) continue;
+    b.cyl("metal", u2, 2.3, 0.1, 0.07, 0.2, 7.4, 8, 2, false);
+    b.box("metal", u2, 3.1, 0.1, 1.7, 7.25, 7.37, 1, 1, { ao: 1 }); b.box("canopy", u2, 3.9, 0.4, 0.9, 7.1, 7.28, 1, 1, { ao: 1 });
+  }
+  const trng = seeded(31);
+  for (let u = U0 + 5; u < U1; u += 15) {                                                                   // street trees on both sidewalks
+    if (!(u > GATE_U[0] - 10 && u < GATE_U[1] + 10)) { const [x, z] = stToWorld(u + trng() * 3, 1.8); URBAN_TREES.push({ x, z, r: 3 + trng() * 1.2 }); }
+    const [x2, z2] = stToWorld(u + 7 + trng() * 3, 17.9); URBAN_TREES.push({ x: x2, z: z2, r: 3 + trng() * 1.2 });
+  }
+  const prng = seeded(53);
+  PERIMETER_RUNS.forEach((run) => {                                                                         // a planted strip just outside the boundary wall
+    for (let i = 0; i < run.length - 1; i++) {
+      const a = pxToM(...run[i]), c = pxToM(...run[i + 1]), len = Math.hypot(c[0] - a[0], c[1] - a[1]), dx = (c[0] - a[0]) / len, dz = (c[1] - a[1]) / len;
+      for (let t = 4; t < len - 4; t += 11 + prng() * 4) {
+        const px = a[0] + dx * t, pz = a[1] + dz * t, nx = -dz, nz = dx, sgn = nx * px + nz * pz >= 0 ? 1 : -1;   // outward normal: away from the campus centre
+        const x = px + nx * sgn * 5.5, z = pz + nz * sgn * 5.5;
+        if (stFromWorld(x, z)[1] > -6) continue;
+        URBAN_TREES.push({ x, z, r: 3.2 + prng() * 1.3 });
+      }
+    }
+  });
+}
+
+/* ---------- surrounding urban fabric ----------
+   Blocks follow the street grid (rows parallel to Anonas Street) and reuse the campus facade palette, so the neighbourhood speaks the same architectural
+   language. Close blocks get the full building generator; the far field uses a light version, and everything fades into the horizon haze. */
+function liteBlock(b, x, z, rot, w, d, floors, style, hip) {
+  const st = FACADE[style], H = floors * st.th;
+  b.place(x, z, rot);
+  b.box({ wall: "wall:" + style, top: "roofflat" }, 0, 0, w, d, 0, H, st.tw, st.th, { ao: 0.85, rtw: 3, rth: 3, noTop: !!hip });
+  if (hip) b.hipRoof("roof:" + hip, 0, 0, w, d, H, Math.min(d * 0.28, 3), 0.6, undefined, 1.2, "soffit");
+  else b.box("trim", 0, 0, w + 0.4, d + 0.4, H - 0.1, H + 0.3, 2, 1, { ao: 1 });
+}
+
+function planSurroundings(near, far) {
+  const rnd = seeded(4172), [hx, hz] = CAMPUS_HALF, CU = 34, RV = 34;
+  const STYLES = ["whitemod", "cream", "pinkhouse", "colonial", "terracotta", "greypunch", "orange", "brick", "condo", "awning"];
+  let idx = 0;
+  for (const side of [1, -1]) for (let k = 0; k < 46; k++) for (let iu = -48; iu <= 48; iu++) {
+    const w = 13 + rnd() * 14, d = 12 + rnd() * 12, lu = iu * CU + (rnd() - 0.5) * 3;
+    const lv = side > 0 ? 21.5 + d / 2 + k * RV : -(7 + d / 2 + k * RV);
+    const [x, z] = stToWorld(lu, lv), dist = Math.hypot(x, z), r = Math.hypot(w, d) / 2;
+    if (dist > 1550) continue;
+    if (side < 0 && Math.abs(x) < hx + 16 + r * 0.7 && Math.abs(z) < hz + 16 + r * 0.7) continue;         // the campus and its boundary strip stay clear
+    const roll = rnd(), openLot = side > 0 && k === 0 && lu + w / 2 > GATE_U[0] - 10 && lu - w / 2 < GATE_U[1] + 10;
+    if (openLot || roll > (dist < 300 ? 0.8 : 0.9) - 0.3 * Math.min(1, dist / 1400)) {                                       // parks and open lots between the blocks
+      if (!openLot && rnd() < 0.55) continue;
+      if (dist > 800) continue;                                                                          // far parks stay empty: their trees would be lost in the haze anyway
+      for (let t = 0, n = 3 + ((rnd() * 4) | 0); t < n; t++) URBAN_TREES.push({ x: x + (rnd() - 0.5) * w, z: z + (rnd() - 0.5) * d, r: 3 + rnd() * 2.6 });
+      continue;
+    }
+    /* the neighbourhood rises gently with distance (low houses and shophouses beside the campus, mid-rise further out, a few towers on the skyline),
+       so the campus stays the visual focus and the surroundings frame it instead of competing with it */
+    const maxF = dist < 260 ? 3 : dist < 520 ? 4 : dist < 900 ? 6 : 8;
+    let floors = 2 + Math.floor(Math.pow(rnd(), 1.4) * (maxF - 1)), bw = w, bd = d;
+    if (dist > 650 && rnd() < 0.05) { floors = 9 + ((rnd() * 6) | 0); bw = 16 + rnd() * 6; bd = 16 + rnd() * 6; }
+    let style = STYLES[(rnd() * STYLES.length) | 0];
+    if (floors <= 2 && rnd() < 0.2) style = "shop";
+    const hip = floors <= 3 && rnd() < 0.55 ? (rnd() < 0.6 ? "maroon" : "clay") : null;
+    const rot = ST.deg + (side > 0 ? 180 : 0) + (k > 0 && rnd() < 0.5 ? 180 : 0);
+    const dr = Math.max(Math.abs(x) - hx, Math.abs(z) - hz, 0);
+    if (dr < 170) {
+      near.place(x, z, rot);
+      near.box({ wall: "concrete", top: "pavement" }, 0, 0, bw + 5, bd + 5, -0.15, 0.04, 3, 3, { ao: 1, rtw: 3, rth: 3 });
+      const [cx, cy] = mToPx(x, z);
+      buildBlock(near, { cx, cy, w: bw / MPP, d: bd / MPP, rot, floors, style, roof: hip ? { type: "hip", mat: hip, rise: 1.6 + rnd() * 1.2 } : { type: "flat", parapet: 0.6 + rnd() * 0.5 }, bands: floors > 2, minD: 8, entrance: floors <= 4 ? { x: 0, w: 3 } : undefined }, 7000 + idx++);
+    } else liteBlock(far, x, z, rot, bw, bd, floors, style, hip);
+  }
+}
+
+function buildStreetAndSurroundings() {
+  const street = new MeshBuilder(), near = new MeshBuilder(), far = new MeshBuilder(), decals = {};
+  buildStreet(street);
+  planSurroundings(near, far);
+  const flush = (b, cast, receive) => Object.entries(b.arrays(M)).forEach(([key, G]) => {
+    let mat = materialFor(key);
+    if (key.startsWith("road")) mat = decals[key] || (decals[key] = Object.assign(materialFor(key).clone(), { polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));   // markings sit on the asphalt without flicker
+    const mesh = new THREE.Mesh(makeGeo(G), mat);
+    mesh.castShadow = cast && key !== "fence"; mesh.receiveShadow = receive;
+    scene.add(mesh);
+  });
+  flush(street, false, true);
+  flush(near, true, true);
+  flush(far, false, false);
+}
+
+/* ---------- campus trails: straight footpaths between neighbouring landmarks and entrances, only where nothing is in the way ---------- */
+const TRAIL_LINKS = [[1, 3], [3, 7], [9, 8], [8, 10], [12, 13], [13, 14], [14, 21], [24, 25], [25, 26], [26, 27], [29, 30], [30, 34], [30, 31], [34, 35], [33, 11], [38, 39], [40, 41], [41, 42], [20, 15]];
+const TRAIL_SPECIALS = [[16, 718, 545, 45.2, 14.8, 2], [37, 1125, 425, 41, 19.5, 22], [38, 1324, 468, 64.2, 23.5, 21.3], [32, 581, 363, 19, 16, 200], [45, 1334, 129, 25, 15, 0], [12, 566, 512, 12, 12, 0],
+  [11, 683, 473, 16, 9, 8], [10, 886, 452, 11, 11, 0], [8, 835, 489, 9, 8, 0], [13, 330, 480, 15, 15, 0], [29, 869, 252, 10, 10, 0], [25, 630, 262, 14, 4, 0], [1, 1294, 678, 9, 5, -18], [2, 1205, 699, 11, 3, -18], [15, 116, 436, 8, 8, 0]];
+
+function addCampusTrails() {
+  const rects = [
+    ...ALLPARTS.map((pt) => ({ id: pt.id, cx: pt.cx / MPP + IMAGE_WIDTH / 2, cz: pt.cz / MPP + IMAGE_HEIGHT / 2, w: pt.w / MPP, d: pt.d / MPP, rot: pt.rot || 0 })),
+    ...COURT_LAYOUT.map((c) => ({ id: c.id, cx: c.x, cz: c.y, w: c.w, d: c.d, rot: c.rot })),
+    ...TRAIL_SPECIALS.map(([id, x, y, w, d, rot]) => ({ id, cx: x, cz: y, w: w / MPP, d: d / MPP, rot }))
+  ];
+  const onOval = (a, b) => { for (let i = 0; i <= 40; i++) { const t = i / 40, x = a[0] + (b[0] - a[0]) * t, y = a[1] + (b[1] - a[1]) * t; if (Math.pow(Math.abs(x - 668) / 442, 2 / 0.74) + Math.pow(Math.abs(y - 672) / 120, 2 / 0.74) <= 1) return true; } return false; };
+  const point = (id) => entranceEndpoint(id) || [locById.get(id).coordinates.center.x, locById.get(id).coordinates.center.y];
+  TRAIL_LINKS.forEach(([from, to]) => {
+    const a = point(from), b = point(to);
+    if (onOval(a, b) || rects.some((r) => r.id !== from && r.id !== to && segmentHitsRect(a, b, r, 11))) return;
+    addGroundRibbon([a, b], 10, "pavement", 0.027);
+    createdTrails.push([a, b]);
+  });
+}
+
+/* =====================================================================
    Environment: sky, lighting, shadows, trees
    ===================================================================== */
 
-const SUN = [0.62, 0.38, 0.55];
+/* ---------- golden-hour constants ---------- */
+const SUN = [0.60, 0.24, 0.52];                                                   // low sun from the south-east (about 17 degrees above the horizon)
+const HAZE = [238, 178, 128];                                                      // horizon haze; the scene fog uses this exact colour so the ground melts into the sky
+const HAZE_HEX = (HAZE[0] << 16) | (HAZE[1] << 8) | HAZE[2];
 
-/* ---------- sky + image-based lighting ---------- */
-function makeSkyTexture() {
-  const W = 1024, H = 512, c = cvs(W, H), g = c.getContext("2d");
-  const gr = g.createLinearGradient(0, 0, 0, H);
-  [[0, "#22385c"], [0.2, "#4b6998"], [0.38, "#a7b3c4"], [0.46, "#efc08a"], [0.5, "#f6cf9a"], [0.52, "#c8a074"], [0.6, "#6a553f"], [1, "#2e271f"]].forEach(([o, col]) => gr.addColorStop(o, col));
-  g.fillStyle = gr; g.fillRect(0, 0, W, H);
-  const n = Math.hypot(...SUN), u = 0.5 + Math.atan2(SUN[2], SUN[0]) / (2 * Math.PI), v = 0.5 + Math.asin(SUN[1] / n) / Math.PI;
-  [0, -W, W].forEach((dx) => {
-    const sx = u * W + dx, sy = (1 - v) * H, glow = g.createRadialGradient(sx, sy, 0, sx, sy, 190);
-    glow.addColorStop(0, "rgba(255,238,196,1)"); glow.addColorStop(0.1, "rgba(255,216,152,.8)"); glow.addColorStop(0.45, "rgba(255,172,102,.28)"); glow.addColorStop(1, "rgba(255,150,90,0)");
-    g.fillStyle = glow; g.fillRect(0, 0, W, H);
+/* vertical colour ramp of the dusk sky, by elevation in degrees: haze gold at the horizon, then coral, rose, orchid, violet and deep indigo */
+const SKY_RAMP = [[-90, [70, 48, 40]], [-14, [120, 82, 62]], [-6, [205, 148, 108]], [-3, HAZE], [1, HAZE], [3.5, [244, 162, 114]], [8, [236, 134, 118]], [15, [208, 114, 140]],
+  [25, [164, 104, 160]], [38, [112, 94, 160]], [55, [68, 72, 136]], [75, [40, 50, 106]], [90, [28, 38, 92]]];
+
+const skyRamp = (e) => {
+  let i = 1;
+  while (i < SKY_RAMP.length - 1 && SKY_RAMP[i][0] < e) i++;
+  const [e0, c0] = SKY_RAMP[i - 1], [e1, c1] = SKY_RAMP[i], t = Math.min(1, Math.max(0, (e - e0) / (e1 - e0)));
+  return [c0[0] + (c1[0] - c0[0]) * t, c0[1] + (c1[1] - c0[1]) * t, c0[2] + (c1[2] - c0[2]) * t];
+};
+
+const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+
+const hash2 = (ix, iy) => { let h = (Math.imul(ix, 374761393) + Math.imul(iy, 668265263)) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+
+function vnoise(x, y) {
+  const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy, sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+  const a = hash2(ix, iy), b = hash2(ix + 1, iy), c = hash2(ix, iy + 1), d = hash2(ix + 1, iy + 1);
+  return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy;
+}
+
+function fbm(x, y, oct) {
+  let s = 0, a = 0.5;
+  for (let i = 0; i < oct; i++) { s += a * vnoise(x, y); const nx = x * 1.62 - y * 1.21 + 17.1, ny = x * 1.21 + y * 1.62 + 5.3; x = nx; y = ny; a *= 0.5; }
+  return s;
+}
+
+/* Paints the whole sky dome into an equirectangular canvas (u = azimuth, v = elevation; same convention as three.js):
+   1. a per-pixel base of the dusk ramp, the sun's layered glow and disc, an orange horizon band and a faint pink counter-glow opposite the sun;
+   2. two cloud decks computed on perspective-projected planes (so they shrink and converge toward the horizon) and lit from the sun's side:
+      a low, broken deck with glowing edges and violet undersides, and a high, stretched cirrus veil;
+   3. three hazy ridge lines at the horizon for depth. */
+function paintSky(c) {
+  const W = c.width, H = c.height, g = c.getContext("2d"), D = 180 / Math.PI;
+  const sn = Math.hypot(...SUN), sd = SUN.map((v) => v / sn), sunAz = Math.atan2(sd[2], sd[0]);
+  const mix = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+  const wrapDeg = (a) => Math.abs(((a + Math.PI * 3) % (Math.PI * 2)) - Math.PI) * D;          // angular distance between azimuths, 0..180
+
+  /* 1. base sky */
+  const bw = 512, bh = 256, base = cvs(bw, bh), bg = base.getContext("2d"), bim = bg.createImageData(bw, bh), bd = bim.data;
+  for (let y = 0; y < bh; y++) {
+    const el = (0.5 - (y + 0.5) / bh) * Math.PI, e = el * D, ce = Math.cos(el), dy = Math.sin(el);
+    for (let x = 0; x < bw; x++) {
+      const az = ((x + 0.5) / bw - 0.5) * Math.PI * 2;
+      const th = Math.acos(Math.min(1, Math.max(-1, ce * Math.cos(az) * sd[0] + dy * sd[1] + ce * Math.sin(az) * sd[2]))) * D, dAz = wrapDeg(az - sunAz);
+      const col = skyRamp(e);
+      const screen = (a, k) => { col[0] += a[0] * k * (1 - col[0] / 255); col[1] += a[1] * k * (1 - col[1] / 255); col[2] += a[2] * k * (1 - col[2] / 255); };
+      screen([255, 146, 58], 0.38 * Math.exp(-((dAz / 55) ** 2)) * Math.exp(-Math.max(e, 0) / 9) * (e > -6 ? 1 : 0));   // glowing horizon band around the sun
+      screen([255, 150, 64], 0.4 * Math.exp(-((th / 40) ** 2)));
+      screen([255, 198, 112], 0.55 * Math.exp(-((th / 14) ** 2)));
+      screen([255, 230, 175], 0.75 * Math.exp(-((th / 4.5) ** 2)));
+      screen([224, 132, 168], 0.2 * smooth(100, 160, dAz) * Math.exp(-(((e - 9) / 6) ** 2)));                          // pink counter-glow ("belt of Venus")
+      const disc = th < 1.4 ? smooth(1.4, 0.8, th) : 0, o = (y * bw + x) * 4;
+      bd[o] = col[0] + (255 - col[0]) * disc; bd[o + 1] = col[1] + (251 - col[1]) * disc; bd[o + 2] = col[2] + (236 - col[2]) * disc; bd[o + 3] = 255;
+    }
+  }
+  bg.putImageData(bim, 0, 0);
+  g.imageSmoothingEnabled = true; g.imageSmoothingQuality = "high";
+  g.drawImage(base, 0, 0, W, H);
+
+  /* 2. clouds, computed on a reduced band (0..72 degrees above the horizon) and scaled up */
+  const CW = Math.round(W * 0.375), CH = Math.round(H * 0.375), r0 = Math.floor((0.5 - 72 / 180) * CH), r1 = Math.floor(CH * 0.5) + 1, rows = r1 - r0;
+  const cc = cvs(CW, rows), cg = cc.getContext("2d"), cim = cg.createImageData(CW, rows), cd = cim.data;
+  const sx = Math.cos(sunAz) * 0.24, sz = Math.sin(sunAz) * 0.24;
+  const LIT_NEAR = [255, 202, 120], LIT_FAR = [238, 150, 180], SHD_NEAR = [172, 92, 98], SHD_FAR = [92, 84, 142], HIGH_NEAR = [255, 226, 176], HIGH_FAR = [255, 190, 196];
+  for (let y = 0; y < rows; y++) {
+    const el = (0.5 - (y + r0 + 0.5) / CH) * Math.PI, e = el * D;
+    if (e < 0.6) continue;
+    const r = 1 / Math.tan(Math.max(el, 0.0105)), ce = Math.cos(el), dy = Math.sin(el), fadeLow = smooth(0.6, 3.4, e), fadeHigh = smooth(72, 46, e), fadeCi = smooth(80, 52, e);
+    const hz = Math.exp(-e / 5.5);
+    for (let x = 0; x < CW; x++) {
+      const az = ((x + 0.5) / CW - 0.5) * Math.PI * 2, X = Math.cos(az) * r, Z = Math.sin(az) * r;
+      const wx = vnoise(X * 0.35 + 11.3, Z * 0.35 + 4.1) * 1.6, wz = vnoise(X * 0.35 + 31.7, Z * 0.35 + 9.2) * 1.6;
+      const d = fbm(X * 0.7 + wx, Z * 1.25 + wz, 5), d2 = fbm((X + sx) * 0.7 + wx, (Z + sz) * 1.25 + wz, 5);
+      const ci = fbm(X * 0.26 + wx * 0.5, Z * 1.8 + wz * 0.5, 4), ci2 = fbm((X + sx) * 0.26 + wx * 0.5, (Z + sz) * 1.8 + wz * 0.5, 4);
+      const th = Math.acos(Math.min(1, Math.max(-1, ce * Math.cos(az) * sd[0] + dy * sd[1] + ce * Math.sin(az) * sd[2]))) * D, s = smooth(100, 12, th);
+      const hazeCol = mix(HAZE, [255, 170, 110], s * 0.6);
+      /* high cirrus veil */
+      const a2 = smooth(0.5, 0.82, ci) * 0.5 * fadeCi * fadeLow;
+      let c2 = mix(mix(HIGH_FAR, HIGH_NEAR, s), mix([150, 100, 150], [236, 140, 120], s), smooth(0.2, -0.4, (ci - ci2) * 5));
+      /* low broken deck */
+      const dens = smooth(0.47, 0.73, d), a1 = dens * 0.96 * fadeLow * fadeHigh;
+      let lit = 0.56 + (d - d2) * 3.4 - smooth(0.72, 1, d) * 0.28;
+      lit = Math.min(1, Math.max(0, lit));
+      let c1 = mix(mix(SHD_FAR, SHD_NEAR, s), mix(LIT_FAR, LIT_NEAR, s), lit);
+      const rim = Math.min(1, Math.max(0, (d - d2) * 5 - 0.25)) * s * (1 - dens * 0.5);
+      c1 = mix(c1, [255, 236, 186], rim * 0.75);
+      c1 = mix(c1, hazeCol, hz * 0.5); c2 = mix(c2, hazeCol, hz * 0.6);
+      const a = a1 + a2 * (1 - a1), o = (y * CW + x) * 4;
+      if (a < 0.003) continue;
+      cd[o] = (c1[0] * a1 + c2[0] * a2 * (1 - a1)) / a; cd[o + 1] = (c1[1] * a1 + c2[1] * a2 * (1 - a1)) / a; cd[o + 2] = (c1[2] * a1 + c2[2] * a2 * (1 - a1)) / a; cd[o + 3] = a * 255;
+    }
+  }
+  cg.putImageData(cim, 0, 0);
+  g.drawImage(cc, 0, r0 * (H / CH), W, rows * (H / CH));
+
+  /* 3. distant ridges fading into the horizon haze */
+  const yH = (0.5 + 3 / 180) * H, yTop = (0.5 - 4 / 180) * H;
+  [[0.5, 3.0, 2.3, [198, 150, 150], 11], [0.3, 2.0, 3.1, [160, 118, 130], 27], [0.1, 1.2, 4.0, [122, 92, 112], 43]].forEach(([b, amp, k, col, seed]) => {
+    g.beginPath(); g.moveTo(0, yH);
+    for (let x = 0; x <= W; x += 4) {
+      const az = (x / W - 0.5) * Math.PI * 2, n = fbm(Math.cos(az) * k + seed, Math.sin(az) * k + seed * 0.7, 4), hgt = b + amp * Math.max(0, n - 0.28) * 1.7;
+      g.lineTo(x, (0.5 - hgt / 180) * H);
+    }
+    g.lineTo(W, yH); g.closePath();
+    const gr = g.createLinearGradient(0, yTop, 0, (0.5 + 0.2 / 180) * H);
+    gr.addColorStop(0, `rgba(${col[0]},${col[1]},${col[2]},0.94)`); gr.addColorStop(1, `rgba(${HAZE[0]},${HAZE[1]},${HAZE[2]},1)`);
+    g.fillStyle = gr; g.fill();
   });
-  const rnd = seeded(5);
-  for (let k = 0; k < 26; k++) { const x = rnd() * W, y = H * (0.22 + rnd() * 0.2), w = 90 + rnd() * 200; const cg = g.createRadialGradient(x, y, 0, x, y, w); cg.addColorStop(0, "rgba(255,226,190,.16)"); cg.addColorStop(1, "rgba(255,226,190,0)"); g.fillStyle = cg; g.save(); g.translate(x, y); g.scale(1, 0.18); g.translate(-x, -y); g.fillRect(x - w, y - w, 2 * w, 2 * w); g.restore(); }
-  const t = new THREE.CanvasTexture(c);
-  t.mapping = THREE.EquirectangularReflectionMapping; t.encoding = THREE.sRGBEncoding;
-  return t;
+}
+
+/* ---------- sky texture + dome ---------- */
+let skyDome = null;
+
+function makeSkyTexture() {
+  const big = renderer.capabilities.maxTextureSize >= 4096, W = big ? 4096 : 2048, c = cvs(W, W / 2);
+  paintSky(c);
+  const t = new THREE.CanvasTexture(c);                                           // sampled raw by the dome shader (no tone mapping), so the painted colours are shown as authored
+  t.generateMipmaps = false; t.minFilter = t.magFilter = THREE.LinearFilter; t.wrapS = THREE.RepeatWrapping; t.wrapT = THREE.ClampToEdgeWrapping;
+  const e = cvs(1024, 512);                                                       // a smaller copy lights the scene (image-based lighting) and tints reflections in the glazing
+  e.getContext("2d").drawImage(c, 0, 0, 1024, 512);
+  const env = new THREE.CanvasTexture(e);
+  env.mapping = THREE.EquirectangularReflectionMapping; env.encoding = THREE.sRGBEncoding;
+  return { dome: t, env };
+}
+
+/* Inside-out sky sphere that follows the camera and always sits behind everything. Direction -> equirect lookup is the same one three.js uses
+   for environment maps, so the painted sun, the sun light and the reflections all agree. */
+function makeSkyDome(tex) {
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { map: { value: tex } }, side: THREE.BackSide, depthWrite: false, depthTest: false, fog: false,
+    vertexShader: "varying vec3 vDir; void main() { vDir = position; vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0); gl_Position = p.xyww; }",
+    fragmentShader: "uniform sampler2D map; varying vec3 vDir; void main() { vec3 d = normalize(vDir); float u = atan(d.z, d.x) * 0.15915494 + 0.5; float v = asin(clamp(d.y, -1.0, 1.0)) * 0.31830989 + 0.5; gl_FragColor = vec4(texture2D(map, vec2(u, v)).rgb, 1.0); }"
+  });
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(450, 48, 32), mat);
+  mesh.renderOrder = -1000; mesh.frustumCulled = false;
+  return mesh;
 }
 
 function setShadowFrustum(center, half) {
@@ -1242,18 +1542,21 @@ function setShadowFrustum(center, half) {
 
 function setupLighting() {
   sunDirV = new THREE.Vector3(...SUN).normalize();
-  scene.add(new THREE.HemisphereLight(0xcfd9f0, 0x6a5238, 0.55));
-  sun = new THREE.DirectionalLight(0xffc387, 2.1);
+  scene.add(new THREE.HemisphereLight(0xcdb4d6, 0x7a5a3c, 0.62));                 // lavender dusk sky above, warm earth bounce below
+  sun = new THREE.DirectionalLight(0xffb266, 2.5);                                // low, deep-golden sun
   sun.castShadow = true;
   const SH = renderer.capabilities.maxTextureSize >= 4096 && Math.min(screen.width, screen.height) > 700 ? 4096 : 2048;
-  sun.shadow.mapSize.set(SH, SH); sun.shadow.bias = -0.0003; sun.shadow.normalBias = 0.05; sun.shadow.radius = 2.5;
+  sun.shadow.mapSize.set(SH, SH); sun.shadow.bias = -0.0003; sun.shadow.normalBias = 0.06; sun.shadow.radius = 2.5;
   scene.add(sun, sun.target);
   setShadowFrustum(new THREE.Vector3(8, 0, 8), 112);
-  const fill = new THREE.DirectionalLight(0x8aa0cc, 0.26); fill.position.set(-90, 40, -70); scene.add(fill);
-  const sky = makeSkyTexture();
-  scene.background = sky;
-  try { const pm = new THREE.PMREMGenerator(renderer); scene.environment = pm.fromEquirectangular(sky).texture; pm.dispose(); } catch (e) { console.warn("environment lighting unavailable", e); }
-  scene.fog = new THREE.Fog(0xdcb186, 170, 760);
+  const fill = new THREE.DirectionalLight(0x8f9fd8, 0.3); fill.position.set(-90, 40, -70); scene.add(fill);   // cool sky fill opposite the sun
+  const tex = makeSkyTexture();
+  skyDome = makeSkyDome(tex.dome);
+  scene.add(skyDome);
+  renderer.setClearColor(HAZE_HEX);
+  try { const pm = new THREE.PMREMGenerator(renderer); scene.environment = pm.fromEquirectangular(tex.env).texture; pm.dispose(); } catch (e) { console.warn("environment lighting unavailable", e); }
+  tex.env.dispose();
+  scene.fog = new THREE.Fog(HAZE_HEX, 170, 760);                                  // same colour as the horizon haze: the ground melts into the sky
 }
 
 /* ---------- soft contact shadows under buildings (cheap ambient-occlusion substitute) ---------- */
@@ -1289,10 +1592,23 @@ function addTrees() {
   const taken = (x, z, px, py) => ALLPARTS.some((pt) => inPart(pt, x, z, 4.0)) ||
     Object.values(SPECIAL_R).some(([sx, sy, r]) => { const [wx, wz] = pxToM(sx, sy); return Math.hypot(x - wx, z - wz) < r + 3; }) ||
     courtRects.some((rect) => rectsOverlap(rect, { cx: x, cz: z, w: 1.8, d: 1.8, rot: 0 }, 0.25)) || nearRoad(px, py);
+  // The oval track and its grass interior stay free of trees: a tree is skipped when it stands inside the track's outer edge
+  // (same superellipse as the track band in buildGround) or when its crown reaches that edge.
+  const ovalEdge = Array.from({ length: 720 }, (_, i) => { const a = (i / 720) * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a); return [668 + 420 * Math.sign(ca) * Math.pow(Math.abs(ca), 0.74), 672 + 98 * Math.sign(sa) * Math.pow(Math.abs(sa), 0.74)]; });
+  const onOval = (px, py, rp) => Math.pow(Math.abs(px - 668) / 420, 2 / 0.74) + Math.pow(Math.abs(py - 672) / 98, 2 / 0.74) <= 1 || ovalEdge.some(([ex, ey]) => Math.hypot(px - ex, py - ey) < rp * 0.95);
   const rnd = seeded(2024), list = [];
-  raw.forEach(([px, py, rp]) => { const [x, z] = pxToM(px, py); if (!taken(x, z, px, py)) list.push({ x, z, r: Math.max(2.2, rp * METERS_PER_PX * 0.95) }); });
-  const far = [];                                                              // sparse tree belt beyond the photographed area, fading into the haze
-  for (let k = 0; k < 320; k++) { const x = (rnd() - 0.5) * 520, z = (rnd() - 0.5) * 330; if (Math.abs(x) < WORLD_W / (2 * M) + 6 && Math.abs(z) < WORLD_H / (2 * M) + 6) continue; far.push({ x, z, r: 3 + rnd() * 3 }); }
+  raw.forEach(([px, py, rp]) => { const [x, z] = pxToM(px, py); if (stFromWorld(x, z)[1] < -2 && !taken(x, z, px, py) && !onOval(px, py, rp)) list.push({ x, z, r: Math.max(2.2, rp * METERS_PER_PX * 0.95) }); });
+  /* Groves in the open parts of the campus that the photographed trees leave bare (west, north and east edges), grown in clumps rather than evenly,
+     and kept clear of buildings, courts, the oval, trails and the street footpath. */
+  { const irnd = seeded(77), [hx, hz] = CAMPUS_HALF;
+    for (let k = 0, added = 0; k < 7000 && added < 260; k++) {
+      const x = (irnd() * 2 - 1) * (hx - 5), z = (irnd() * 2 - 1) * (hz - 5), [px, py] = mToPx(x, z);
+      if (stFromWorld(x, z)[1] > -9 || vnoise(x * 0.035 + 4, z * 0.035 + 9) < 0.5) continue;
+      if (taken(x, z, px, py) || onOval(px, py, 14) || list.some((t) => Math.hypot(t.x - x, t.z - z) < 7.5)) continue;
+      if (createdTrails.some(([a, b]) => distanceToSegment([px, py], a, b) < 24)) continue;
+      list.push({ x, z, r: 2.8 + irnd() * 2.2 }); added++;
+    } }
+  const far = URBAN_TREES.slice();                                              // street trees, boundary planting and parks between the surrounding blocks
   const all = list.concat(far), N = all.length * 3;
   const leaf = cvs(64, 64), lg = leaf.getContext("2d");
   lg.fillStyle = "#6a8a3c"; lg.fillRect(0, 0, 64, 64);
@@ -1793,7 +2109,7 @@ export function initScene({ onSelectLocation }) {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.0;
+  renderer.toneMappingExposure = 1.05;
   MAX_ANISO = Math.min(8, renderer.capabilities.getMaxAnisotropy());
   dom.host.appendChild(renderer.domElement);
 
@@ -1804,6 +2120,8 @@ export function initScene({ onSelectLocation }) {
   buildGround();
   const rec = buildCampus();
   addCampusWalkways();
+  addCampusTrails();
+  buildStreetAndSurroundings();
   runSpatialAudit();
   addContactShadows();
   addTrees();
@@ -1920,6 +2238,7 @@ export function animate(now) {
   else if (shadowLocal) { setShadowFrustum(new THREE.Vector3(8, 0, 8), 112); shadowLocal = false; }
   pathTextures.forEach((t) => { t.offset.x -= dt * 0.9; });
 
+  if (skyDome) skyDome.position.copy(camera.position);
   renderer.render(scene, camera);
 
   if (pointer.moved && pointer.inside) {
