@@ -15,25 +15,20 @@
 
   <link rel="stylesheet" href="style.css" />
 
-  <!-- 3D engine (pinned versions). Order matters: deferred scripts run in sequence. -->
   <script defer src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
-  <!-- Application code: ES modules (entry: main.js). Deferred, so it runs after the 3D engine above. -->
   <script type="module" src="main.js"></script>
 </head>
 <body>
   <div class="app" id="app">
 
-    <!-- Full-screen 3D scene -->
     <div class="scene-host" id="sceneHost"></div>
     <div class="scene-fallback glass" id="sceneFallback" hidden>
       <h2>3D view unavailable</h2>
       <p id="sceneFallbackText">The 3D engine could not start. Check your connection and that WebGL is enabled, then reload.</p>
     </div>
 
-    <!-- Floating navigation: Sintanglaw > Search  |  Directory > Filter -->
     <div class="topnav">
-    <!-- Left group: identity + primary action -->
     <div class="nav-left">
       <header class="brand-card glass">
         <h1>Sintanglaw</h1>
@@ -44,7 +39,6 @@
       </label>
     </div>
 
-    <!-- Right group: browsing + refinement -->
     <div class="discovery">
       <div class="discovery-row">
         <button id="sidebarToggleBtn" class="panel-toggle glass" type="button" aria-expanded="false" aria-controls="panelBody">
@@ -62,8 +56,8 @@
           </button>
           <div class="filter-menu glass" id="filterMenu" role="menu" hidden>
             <button type="button" role="menuitemradio" data-filter="all" aria-checked="true">All locations</button>
-            <button type="button" role="menuitemradio" data-filter="academic" aria-checked="false"><i class="swatch swatch-academic"></i>Academic</button>
-            <button type="button" role="menuitemradio" data-filter="landmark" aria-checked="false"><i class="swatch swatch-landmark"></i>Landmarks</button>
+            <button type="button" role="menuitemradio" data-filter="academic" aria-checked="false">Academic</button>
+            <button type="button" role="menuitemradio" data-filter="landmark" aria-checked="false">Landmarks</button>
           </div>
         </div>
       </div>
@@ -79,10 +73,9 @@
     </div>
     </div>
 
-    <!-- Bottom-center: view modes + camera actions -->
     <nav class="dock glass" aria-label="Camera controls">
       <div class="seg" role="group" aria-label="View mode">
-        <button type="button" class="seg-btn is-on" data-mode="orbit" aria-pressed="true" aria-label="Orbit view" title="Orbit view"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="12" rx="9" ry="4"/><circle cx="12" cy="12" r="2"/></svg><span class="btn-label">Orbit</span></button>
+        <button type="button" class="seg-btn" data-mode="orbit" aria-pressed="true" aria-label="Orbit view" title="Orbit view"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="12" rx="9" ry="4"/><circle cx="12" cy="12" r="2"/></svg><span class="btn-label">Orbit</span></button>
         <button type="button" class="seg-btn" data-mode="topdown" aria-pressed="false" aria-label="Top-down view" title="Top-down view"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 12h16M12 4v16"/></svg><span class="btn-label">Top-Down</span></button>
         <button type="button" class="seg-btn" data-mode="walking" aria-pressed="false" aria-label="Walking view" title="Walking view (W A S D to move)"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="13" cy="5" r="2"/><path d="M12 8l-3 5 3 2v5M12 8l3 3 3 1M9 13l-3 1"/></svg><span class="btn-label">Walking</span></button>
       </div>
