@@ -1,12 +1,7 @@
-/* Top navigation: directory dropdown (list + info card), search input and category filter. */
 import { campusLocations, categoryLabel, categoryOf, locById, placeImage } from "./locations.js";
 import { focusLocation, updateVisualState } from "./scene.js";
 import { MAX_DESTINATIONS, matches, state } from "./appState.js";
 import { dom, reduceMotion } from "./dom.js";
-
-/* =====================================================================
-   Directory panel
-   ===================================================================== */
 
 export function setPanelOpen(open) {
   state.directoryOpen = open;
@@ -91,7 +86,6 @@ function toggleDestination(id) {
   updateVisualState();
 }
 
-/* Directory toggle, list rows and info-card actions. */
 function bindDirectory() {
   dom.toggle.addEventListener("click", () => setPanelOpen(!state.directoryOpen));
 
@@ -109,11 +103,6 @@ function bindDirectory() {
   });
 }
 
-/* =====================================================================
-   Search
-   ===================================================================== */
-
-/* Search input: updates the query, refreshes the directory and map, and opens the directory when there is a query. */
 function bindSearch() {
   dom.search.addEventListener("input", () => {
     state.query = dom.search.value.trim().toLowerCase();
@@ -123,10 +112,6 @@ function bindSearch() {
   });
 }
 
-/* =====================================================================
-   Filter
-   ===================================================================== */
-
 export function syncFilterState() {
   const on = state.filter !== "all";
   dom.filterDot.hidden = !on;
@@ -134,7 +119,6 @@ export function syncFilterState() {
   dom.filterBtn.title = on ? "Filter locations (filter active)" : "Filter locations";
 }
 
-/* Filter button, menu and outside-click dismissal. */
 function bindFilters() {
   dom.filterBtn.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -159,7 +143,6 @@ function bindFilters() {
   });
 }
 
-/* Binds the navigation controls. */
 export function initNavigation() {
   bindDirectory();
   bindSearch();
