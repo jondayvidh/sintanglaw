@@ -1,5 +1,3 @@
-/* Reusable DOM helpers: element lookup, the app's element registry, motion preference and toast. */
-
 const $ = (id) => document.getElementById(id);
 
 export const dom = {
