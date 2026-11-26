@@ -1,11 +1,6 @@
-/* Map and 3D scene: scene setup, procedural campus, location pins, camera (orbit / top-down / walking), zoom, panning, picking and the render loop. */
 import { BLOCKS, CONTEXT_BLOCKS, COURT_LAYOUT, IMAGE_HEIGHT, IMAGE_WIDTH, M, METERS_PER_PX, PEDESTRIAN_LINKS, SITE_OFFSETS, SPECIAL_R, STREET_WALL, TREE_DATA, WORLD_H, WORLD_W, applySiteOffset, campusLocations, categoryOf, locById, pxToM } from "./locations.js";
 import { matches, state } from "./appState.js";
 import { dom, reduceMotion, showToast } from "./dom.js";
-
-/* =====================================================================
-   Runtime state
-   ===================================================================== */
 
 let ready = false;
 let renderer, scene, camera, controls, pathGroup;
@@ -25,26 +20,17 @@ const keys = new Set();
 
 const pointer = { x: 0, y: 0, moved: false, downX: 0, downY: 0, inside: false };
 
-/* ---- Constants ---- */
 const MIN_ZOOM_DISTANCE = 8;
 const MAX_ZOOM_DISTANCE = 230;
 const ZOOM_STEP = 1.6;
 const PATH_COLORS = [0xf1b434, 0xffffff, 0xb87333];
 
-/* Preferred orbit perspective, shared by the landing view, the Orbit View preset, the reset view and the focus fallback:
-   a shallow, oblique view across the campus from the south-west, so building facades, the horizon and a band of sky stay in
-   frame. Only the viewing direction is fixed here; the focal point and distance are solved from the location markers and the
-   viewport aspect (see orbitHomePose). */
 const ORBIT_VIEW = {
-  azimuth: -30,                                   // degrees around the focal point: 0 = camera due south looking north, negative = swung west
-  elevation: 14,                                  // degrees above the horizon (the previous default sat at about 44 degrees)
-  frame: { x: 0.9, top: 0.62, bottom: -0.78 },    // share of the viewport (NDC) the markers may occupy; keeps them clear of the sky band and the dock
-  maxDistance: MAX_ZOOM_DISTANCE * 0.85           // on narrow screens crop the campus rather than pull back into the fog
+  azimuth: -30,
+  elevation: 14,
+  frame: { x: 0.9, top: 0.62, bottom: -0.78 },
+  maxDistance: MAX_ZOOM_DISTANCE * 0.85
 };
-
-/* =====================================================================
-   Coordinate helpers
-   ===================================================================== */
 
 function toWorld(c) {
   return new THREE.Vector3((c.x / IMAGE_WIDTH - 0.5) * WORLD_W, 0, (c.y / IMAGE_HEIGHT - 0.5) * WORLD_H);
@@ -59,16 +45,11 @@ function seeded(seed) {
   return () => { t += 0x6d2b79f5; let r = Math.imul(t ^ (t >>> 15), 1 | t); r ^= r + Math.imul(r ^ (r >>> 7), 61 | r); return ((r ^ (r >>> 14)) >>> 0) / 4294967296; };
 }
 
-const inPart = (pt, x, z, margin = 0) => {                         // is world-metre point (x,z) inside a rotated rectangular part?
+const inPart = (pt, x, z, margin = 0) => {
   const a = (pt.rot * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a), dx = x - pt.cx, dz = z - pt.cz;
   return Math.abs(dx * c + dz * s) <= pt.w / 2 + margin && Math.abs(-dx * s + dz * c) <= pt.d / 2 + margin;
 };
 
-/* =====================================================================
-   Procedural textures
-   ===================================================================== */
-
-/* ---------- procedural ground material texture (no photographic campus image) ---------- */
 function makeProceduralGrassTexture(repeatX = 11, repeatY = 6) {
   const S = 512, extent = S * 3, tile = document.createElement("canvas");
   tile.width = tile.height = extent;
@@ -76,7 +57,6 @@ function makeProceduralGrassTexture(repeatX = 11, repeatY = 6) {
   g.fillStyle = "#626d4e";
   g.fillRect(0, 0, extent, extent);
 
-  // Draw each variation into a 3x3 wraparound tile, then crop its seamless centre.
   for (let i = 0; i < 180; i++) {
     const x = S + rnd() * S, y = S + rnd() * S, r = 18 + rnd() * 88;
     const shade = rnd() < 0.52 ? [38, 55, 31] : [157, 151, 105];
@@ -91,7 +71,6 @@ function makeProceduralGrassTexture(repeatX = 11, repeatY = 6) {
     }
   }
 
-  // Fine grass flecks use the same wraparound treatment to avoid visible tile seams.
   for (let i = 0; i < 15500; i++) {
     const x = S + rnd() * S, y = S + rnd() * S, len = 1 + rnd() * 3.2;
     const color = rnd() < 0.58 ? `rgba(177,174,124,${0.035 + rnd() * 0.09})` : `rgba(29,43,25,${0.035 + rnd() * 0.09})`;
@@ -132,7 +111,6 @@ function makeCourtTexture(isTennis = false) {
   const g = c.getContext("2d");
   g.fillStyle = isTennis ? "#557b68" : "#456b7c";
   g.fillRect(0, 0, c.width, c.height);
-  // Gentle two-tone wear keeps the playing surface restrained rather than glossy or neon.
   g.fillStyle = "rgba(226,232,221,0.045)";
   g.fillRect(8, 8, 248, 240);
   g.strokeStyle = "rgba(244,241,226,0.9)";
@@ -172,8 +150,6 @@ function makeDashTexture() {
   return t;
 }
 
-/* ---------- facade styles (tile = one bay x one storey, in metres) ----------
-   Colours/patterns follow the reference photo of each building (see BLOCKS below). */
 const FACADE = {
   balcony:   { tw: 4.2, th: 3.4, wall: "#e4d8c2", win: "balcony", frame: "#5b3b2e", glass: "#27323b", accent: "#f4eee2", rail: "#7a2f27" },
   redlab:    { tw: 3.2, th: 3.4, wall: "#a63a2e", win: "punched", frame: "#f4efe6", glass: "#2a3640", accent: "#f4efe6", ww: 0.62, wh: 0.5 },
@@ -196,7 +172,6 @@ const FACADE = {
   condo:     { tw: 3.3, th: 3.2, wall: "#d3d0cb", win: "punched", frame: "#3b3f43", glass: "#2d3943", accent: "#8f3a2f", ww: 0.5, wh: 0.48 },
 };
 
-/* ---------- procedural texture library (canvas; 64 px per metre on facades) ---------- */
 const TEX = {};
 
 const cvs = (w, h) => { const c = document.createElement("canvas"); c.width = w; c.height = h; return c; };
@@ -213,11 +188,10 @@ function speckle(g, w, h, rnd, n, a, light = false) {
   for (let i = 0; i < n; i++) { const v = rnd() * 255 | 0; g.fillStyle = light ? `rgba(255,255,255,${a * rnd()})` : `rgba(${v * 0.3 | 0},${v * 0.3 | 0},${v * 0.3 | 0},${a * rnd()})`; g.fillRect(rnd() * w, rnd() * h, 1 + rnd() * 2, 1 + rnd() * 2); }
 }
 
-function stains(g, w, h, rnd, n, a) {                                          // vertical weathering streaks
+function stains(g, w, h, rnd, n, a) {
   for (let i = 0; i < n; i++) { const x = rnd() * w, len = h * (0.2 + rnd() * 0.6), gr = g.createLinearGradient(0, 0, 0, len); gr.addColorStop(0, `rgba(30,25,20,${a})`); gr.addColorStop(1, "rgba(30,25,20,0)"); g.fillStyle = gr; g.save(); g.translate(x, rnd() * h * 0.4); g.fillRect(0, 0, 1 + rnd() * 3, len); g.restore(); }
 }
 
-/* generic 3-channel painter: colour map + bump map (grey) + roughness map (G channel) */
 function triCanvas(W, H, base, bump0, rough0) {
   const cm = cvs(W, H), cb = cvs(W, H), cr = cvs(W, H), m = cm.getContext("2d"), bm = cb.getContext("2d"), rm = cr.getContext("2d");
   const R = (x, y, w, h, col, bump, rough) => {
@@ -235,7 +209,7 @@ function facadeTex(name) {
   if (TEX["f:" + name]) return TEX["f:" + name];
   const st = FACADE[name], PPM = 64, W = Math.round(st.tw * PPM), H = Math.round(st.th * PPM);
   const T = triCanvas(W, H, st.wall, 128, 222), { m, bm, rm, R } = T, rnd = seeded(name.split("").reduce((a, c) => a + c.charCodeAt(0), 7));
-  const glass = (x, y, w, h) => {                                              // recessed, reflective glazing with a sky-to-ground gradient
+  const glass = (x, y, w, h) => {
     const gr = m.createLinearGradient(0, y, 0, y + h); gr.addColorStop(0, "#6f8190"); gr.addColorStop(0.35, st.glass); gr.addColorStop(1, "#1b242b");
     m.fillStyle = gr; m.fillRect(x, y, w, h);
     bm.fillStyle = "rgb(30,30,30)"; bm.fillRect(x, y, w, h);
@@ -244,8 +218,8 @@ function facadeTex(name) {
   const win = (x, y, w, h, mull = 1) => {
     R(x - 4, y - 4, w + 8, h + 8, st.frame, 200, 150); glass(x, y, w, h);
     for (let i = 1; i <= mull; i++) R(x + (w * i) / (mull + 1) - 1.5, y, 3, h, st.frame, 205, 150);
-    R(x - 6, y + h + 4, w + 12, 5, st.accent || "#ddd", 235, 215);                   // sill
-    const sg = m.createLinearGradient(0, y + h + 9, 0, y + h + 9 + 24); sg.addColorStop(0, "rgba(40,32,26,0.22)"); sg.addColorStop(1, "rgba(40,32,26,0)"); m.fillStyle = sg; m.fillRect(x, y + h + 9, w, 24);  // rain stain
+    R(x - 6, y + h + 4, w + 12, 5, st.accent || "#ddd", 235, 215);
+    const sg = m.createLinearGradient(0, y + h + 9, 0, y + h + 9 + 24); sg.addColorStop(0, "rgba(40,32,26,0.22)"); sg.addColorStop(1, "rgba(40,32,26,0)"); m.fillStyle = sg; m.fillRect(x, y + h + 9, w, 24);
   };
   const kind = st.win;
   if (kind === "punched" || kind === "louver" || kind === "awning") {
@@ -263,7 +237,7 @@ function facadeTex(name) {
   } else if (kind === "balcony") {
     const x = W * 0.2, w = W * 0.6, y = H * 0.1, h = H * 0.58;
     R(x - 5, y - 5, w + 10, h + 10, st.frame, 200, 150); glass(x, y, w, h); R(x + w / 2 - 2, y, 4, h, st.frame, 205, 150);
-    R(0, H * 0.7, W, H * 0.27, st.rail, 168, 150);                                  // balustrade
+    R(0, H * 0.7, W, H * 0.27, st.rail, 168, 150);
     for (let k = 0; k < 22; k++) R((W * (k + 0.5)) / 22 - 1, H * 0.7, 2, H * 0.27, "#5a201b", 210, 140);
     R(0, H * 0.67, W, 5, st.accent, 230, 210);
     R(0, H * 0.97, W, H * 0.03, st.accent, 235, 215);
@@ -275,7 +249,7 @@ function facadeTex(name) {
     R(W * 0.05, H * 0.12, W * 0.9, H * 0.72, st.frame, 200, 150); glass(W * 0.07, H * 0.14, W * 0.86, H * 0.68);
     R(W * 0.48, H * 0.14, 4, H * 0.68, st.frame, 205, 150); R(0, H * 0.02, W, H * 0.09, st.accent, 215, 200);
   } else if (kind === "capiz") {
-    R(0, H * 0.64, W, H * 0.36, "#b79456", 150, 200);                               // plastered ground-floor base
+    R(0, H * 0.64, W, H * 0.36, "#b79456", 150, 200);
     R(W * 0.06, H * 0.14, W * 0.88, H * 0.44, st.frame, 195, 190);
     for (let i = 0; i < 6; i++) for (let j = 0; j < 3; j++) R(W * 0.08 + i * (W * 0.84) / 6, H * 0.16 + j * (H * 0.4) / 3, (W * 0.84) / 6 - 4, (H * 0.4) / 3 - 4, st.glass, 110, 70);
   } else if (kind === "steelframe") {
@@ -299,7 +273,7 @@ function roofTex(kind) {
   const S = 128, rnd = seeded(kind.length * 977 + kind.charCodeAt(0));
   const cfg = { maroon: ["#8a2f29", "#a8413a", "#6a221e", "rib"], pinkred: ["#9c4c49", "#b3605c", "#7a3835", "rib"], redtrim: ["#8f2f2d", "#a84743", "#6e2423", "rib"], steel: ["#9aa0a3", "#b6bcbf", "#7b8184", "rib"],
     clay: ["#9a432e", "#b45a40", "#6e2f20", "tile"], thatch: ["#4b3a26", "#6a553a", "#2d2216", "thatch"], tent: ["#dcdad4", "#f1efe9", "#9b9a95", "tent"] }[kind];
-  const T = triCanvas(S, S, cfg[0], 128, 175), { m, bm, rm, R } = T;
+  const T = triCanvas(S, S, cfg[0], 128, 175), { m, bm, R } = T;
   if (cfg[3] === "rib") for (let k = 0; k < 8; k++) { const x = (k * S) / 8; R(x, 0, S / 16, S, cfg[1], 205, 130); R(x + S / 16, 0, S / 24, S, cfg[2], 60, 190); }
   if (cfg[3] === "tile") for (let r = 0; r < 8; r++) for (let c = 0; c < 6; c++) { const x = c * (S / 6) + (r % 2) * (S / 12), y = r * (S / 8); R(x + 1, y + 1, S / 6 - 2, S / 8 - 2, rnd() < 0.5 ? cfg[0] : cfg[1], 170 + rnd() * 30, 170); R(x, y + S / 8 - 3, S / 6, 3, cfg[2], 40, 200); }
   if (cfg[3] === "thatch") for (let k = 0; k < 420; k++) { const x = rnd() * S; m.strokeStyle = rnd() < 0.5 ? cfg[1] : cfg[2]; m.globalAlpha = 0.6; m.lineWidth = 1 + rnd() * 1.5; m.beginPath(); m.moveTo(x, 0); m.lineTo(x + (rnd() - 0.5) * 8, S); m.stroke(); bm.strokeStyle = rnd() < 0.5 ? "#d0d0d0" : "#303030"; bm.lineWidth = 1.5; bm.globalAlpha = 0.6; bm.beginPath(); bm.moveTo(x, 0); bm.lineTo(x, S); bm.stroke(); }
@@ -309,11 +283,10 @@ function roofTex(kind) {
   return (TEX["r:" + kind] = pack(T));
 }
 
-/* ---------- simple surfaces ---------- */
 function surfTex(name) {
   if (TEX["s:" + name]) return TEX["s:" + name];
   const S = 256, rnd = seeded(name.length * 313 + name.charCodeAt(1) * 17);
-  const P = {   // name: [base colour, roughness, speckle]
+  const P = {
     concrete: ["#b7b3aa", 225, 900], pavement: ["#a9a79e", 238, 1200], track: ["#765344", 220, 900], trackMark: ["#b08a6c", 205, 240], concreteWhite: ["#dcd9d2", 215, 600], plinth: ["#7d7a73", 230, 900], trim: ["#e7e4dc", 215, 400], canopy: ["#d0ccc2", 215, 500], column: ["#cdc8be", 215, 400],
     columnred: ["#8f2a22", 200, 300], slab: ["#d9d5cc", 215, 400], ceiling: ["#8e8a84", 235, 500], soffit: ["#b8afa2", 235, 500], roofflat: ["#6f6d68", 240, 1800], stagefloor: ["#8a857c", 220, 700],
     stepconcrete: ["#a9a69f", 225, 700], seat: ["#52667a", 160, 500], coping: ["#cfcbc2", 200, 400], curb: ["#a7a49c", 230, 700], tower: ["#9b9a95", 235, 1100], obelisk: ["#ecebe5", 210, 200],
@@ -324,7 +297,7 @@ function surfTex(name) {
     asphalt: ["#454548", 236, 1800], roadline: ["#ece7d6", 200, 100], roadyellow: ["#e2ad2e", 200, 100],
   }[name] || ["#b0aca3", 225, 500];
   const SW = name === "signplate" ? 520 : S, SH = name === "signplate" ? 180 : S;
-  const T = triCanvas(SW, SH, P[0], 128, P[1]), { m, bm, rm, R } = T;
+  const T = triCanvas(SW, SH, P[0], 128, P[1]), { m, bm, R } = T;
   if (name === "brick") for (let r = 0; r < 16; r++) for (let c = 0; c < 16; c++) { const horiz = (r + c) % 2 === 0, x = c * 16, y = r * 16; m.fillStyle = ["#a04a38", "#8e402f", "#b05640", "#98442f"][(rnd() * 4) | 0]; if (horiz) { m.fillRect(x + 1, y + 1, 14, 6); m.fillRect(x + 1, y + 9, 14, 6); } else { m.fillRect(x + 1, y + 1, 6, 14); m.fillRect(x + 9, y + 1, 6, 14); } }
   if (name === "pavers" || name === "deckpink" || name === "tile" || name === "stepconcrete") { const n = name === "tile" ? 16 : 8, s = S / n; m.strokeStyle = name === "tile" ? "rgba(220,235,240,.5)" : "rgba(60,50,45,.35)"; m.lineWidth = 1.5; for (let k = 0; k <= n; k++) { m.beginPath(); m.moveTo(k * s, 0); m.lineTo(k * s, S); m.stroke(); m.beginPath(); m.moveTo(0, k * s); m.lineTo(S, k * s); m.stroke(); bm.strokeStyle = "#555"; bm.lineWidth = 2; bm.beginPath(); bm.moveTo(k * s, 0); bm.lineTo(k * s, S); bm.stroke(); bm.beginPath(); bm.moveTo(0, k * s); bm.lineTo(S, k * s); bm.stroke(); } }
   if (name === "stone") for (let r = 0; r < 8; r++) for (let c = 0; c < 4; c++) { const x = c * 64 + (r % 2) * 32, y = r * 32; m.strokeStyle = "rgba(40,36,30,.55)"; m.lineWidth = 2; m.strokeRect(x, y, 64, 32); bm.strokeStyle = "#444"; bm.lineWidth = 3; bm.strokeRect(x, y, 64, 32); }
@@ -339,7 +312,7 @@ function surfTex(name) {
   return (TEX["s:" + name] = pack(T));
 }
 
-function letterTex(letter) {                                                      // PUP letters on the front face of each pylon slab (reference photo)
+function letterTex(letter) {
   if (TEX["l:" + letter]) return TEX["l:" + letter];
   const T = triCanvas(128, 256, "#e3e0d6", 128, 190), { m, bm } = T, rnd = seeded(letter.charCodeAt(0));
   speckle(m, 128, 256, rnd, 500, 0.1); stains(m, 128, 256, rnd, 6, 0.14);
@@ -355,15 +328,8 @@ function fenceTex() {
   return (TEX.fence = toTex(c, true));
 }
 
-/* ---------- context: the neoclassical Main Building north of the campus (visible in the aerial photo, not one of the 50 locations) ---------- */
 FACADE.stone = { tw: 3.8, th: 4.4, wall: "#d7c59d", win: "punched", frame: "#6f5a3c", glass: "#2c353b", accent: "#eadfc0", ww: 0.42, wh: 0.62 };
 
-/* =====================================================================
-   Materials
-   ===================================================================== */
-
-/* ---------- material factory ----------
-   key forms: wall:<style>  roof:<kind>  pier:#hex  parapet:#hex  <surface name> ;  `env` is a shared IBL intensity */
 const ENV_INT = 0.55;
 
 const GLASSY = new Set(["door", "glassdoor", "skyglass", "water"]);
@@ -386,10 +352,6 @@ const MAT_CACHE = {};
 
 const materialFor = (key) => MAT_CACHE[key] || (MAT_CACHE[key] = makeMaterial(key));
 
-/* =====================================================================
-   Geometry builder
-   ===================================================================== */
-
 function addWhiteVertexColors(geometry) {
   const count = geometry.getAttribute("position").count;
   const colors = new Float32Array(count * 3);
@@ -398,7 +360,6 @@ function addWhiteVertexColors(geometry) {
   return geometry;
 }
 
-/* ---------- MeshBuilder: plain-array geometry, merged per material key ---------- */
 class MeshBuilder {
   constructor() { this.g = {}; this.place(0, 0, 0); }
   place(x, z, deg) { const a = (deg * Math.PI) / 180; this.ox = x; this.oz = z; this.c = Math.cos(a); this.s = Math.sin(a); return this; }
@@ -422,8 +383,7 @@ class MeshBuilder {
     G.i.push(base, base + 1, base + 2, base, base + 2, base + 3);
   }
   tri(key, a, b, c, uv, col) { this.quad(key, a, b, c, c, [uv[0], uv[1], uv[2], uv[2]], col); this._dropDegenerate(key); }
-  _dropDegenerate(key) { const G = this.g[key]; if (!G) return; G.i.length -= 3; }      // quad() pushed 2 tris; keep only the first
-  /* vertical wall from (x0,z0) to (x1,z1); outward normal = (-dz, 0, dx). AO darkens the bottom 2.5 m. */
+  _dropDegenerate(key) { const G = this.g[key]; if (!G) return; G.i.length -= 3; }
   wall(key, x0, z0, x1, z1, y0, y1, tw, th, o = {}) {
     const len = Math.hypot(x1 - x0, z1 - z0), uo = (o.uo || 0) / tw, u1 = uo + len / tw;
     const ao = o.ao ?? 0.74, band = Math.min(2.5, y1 - y0);
@@ -435,13 +395,12 @@ class MeshBuilder {
         [[ca, ca, ca], [ca, ca, ca], [cb, cb, cb], [cb, cb, cb]]);
     });
   }
-  top(key, x0, z0, x1, z1, y, tw, th, col) {                                   // upward face of an axis-aligned rect
+  top(key, x0, z0, x1, z1, y, tw, th, col) {
     this.quad(key, [x0, y, z0], [x0, y, z1], [x1, y, z1], [x1, y, z0], [[x0 / tw, z0 / th], [x0 / tw, z1 / th], [x1 / tw, z1 / th], [x1 / tw, z0 / th]], col ?? 1);
   }
   bottom(key, x0, z0, x1, z1, y, tw, th) {
     this.quad(key, [x0, y, z0], [x1, y, z0], [x1, y, z1], [x0, y, z1], [[x0 / tw, z0 / th], [x1 / tw, z0 / th], [x1 / tw, z1 / th], [x0 / tw, z1 / th]], 0.7);
   }
-  /* box: keys = {wall, top} (or a single string). Walls run S, E, N, W. */
   box(keys, cx, cz, w, d, y0, y1, tw = 4, th = 3.4, o = {}) {
     const k = typeof keys === "string" ? { wall: keys, top: keys } : keys;
     const x0 = cx - w / 2, x1 = cx + w / 2, z0 = cz - d / 2, z1 = cz + d / 2;
@@ -451,32 +410,30 @@ class MeshBuilder {
     this.wall(k.wall, x0, z0, x0, z1, y0, y1, tw, th, { ...o, uo: (o.uo || 0) + 2 * w + d });
     if (!o.noTop) this.top(k.top ?? k.wall, x0, z0, x1, z1, y1, o.rtw || tw, o.rth || th);
   }
-  /* hip roof; ridge runs along local x (alongX) or z. Slope faces get u along the eave, v up the slope. */
   hipRoof(key, cx, cz, w, d, y0, rise, ov = 0.8, alongX = d <= w, tile = 1.2, soffitKey) {
     const W = (alongX ? w : d) / 2 + ov, D = (alongX ? d : w) / 2 + ov, ridge = Math.max(W - D, 0);
     const map = alongX ? (u, v) => [cx + u, cz + v] : (u, v) => [cx - v, cz + u];
     const P = (u, y, v) => { const m = map(u, v); return [m[0], y, m[1]]; };
     const sl = Math.hypot(D, rise), y1 = y0 + rise;
     const slopeUV = [[0, 0], [(2 * W) / tile, 0], [(2 * W + 2 * ridge) / 2 / tile, sl / tile], [(2 * W - 2 * ridge) / 2 / tile, sl / tile]];
-    this.quad(key, P(-W, y0, D), P(W, y0, D), P(ridge, y1, 0), P(-ridge, y1, 0), slopeUV, 1);        // south slope
-    this.quad(key, P(W, y0, -D), P(-W, y0, -D), P(-ridge, y1, 0), P(ridge, y1, 0), slopeUV, 1);      // north slope
+    this.quad(key, P(-W, y0, D), P(W, y0, D), P(ridge, y1, 0), P(-ridge, y1, 0), slopeUV, 1);
+    this.quad(key, P(W, y0, -D), P(-W, y0, -D), P(-ridge, y1, 0), P(ridge, y1, 0), slopeUV, 1);
     const ends = [[P(W, y0, D), P(W, y0, -D), P(ridge, y1, 0)], [P(-W, y0, -D), P(-W, y0, D), P(-ridge, y1, 0)]];
     ends.forEach(([a, b, c]) => this.tri(key, a, b, c, [[0, 0], [2 * D / tile, 0], [D / tile, sl / tile]], 1));
     const sk = soffitKey || key;
     this.quad(sk, P(-W, y0, -D), P(W, y0, -D), P(W, y0, D), P(-W, y0, D), [[0, 0], [2 * W / tile, 0], [2 * W / tile, 2 * D / tile], [0, 2 * D / tile]], 0.55);
-    const eave = [[-W, D], [W, D], [W, -D], [-W, -D]], thatch = key === "roof:thatch";           // fascia board: gives the eave a visible thickness and a crisp shadow line (not on thatch)
+    const eave = [[-W, D], [W, D], [W, -D], [-W, -D]], thatch = key === "roof:thatch";
     for (let k = 0; k < 4 && !thatch; k++) {
       const [ua, va] = eave[k], [ub, vb] = eave[(k + 1) % 4], el = Math.hypot(ub - ua, vb - va);
       this.quad("trim", P(ua, y0 - 0.22, va), P(ub, y0 - 0.22, vb), P(ub, y0 + 0.07, vb), P(ua, y0 + 0.07, va), [[0, 0], [el / 2, 0], [el / 2, 0.15], [0, 0.15]], 1);
     }
-    if (ridge > 0.6 && !thatch) {                                                               // ridge cap
+    if (ridge > 0.6 && !thatch) {
       const rl = 2 * ridge + 0.6;
       if (alongX) this.box(key, cx, cz, rl, 0.34, y1 - 0.04, y1 + 0.2, 1.2, 1.2, { ao: 1 });
       else this.box(key, cx, cz, 0.34, rl, y1 - 0.04, y1 + 0.2, 1.2, 1.2, { ao: 1 });
     }
     return y1;
   }
-  /* barrel (arched) roof; axis along local x, arc across z; chord = wid, sagitta = rise */
   barrel(key, cx, cz, len, wid, y0, rise, segs = 16, tile = 1.2, endKey) {
     const R = (wid * wid / 4 + rise * rise) / (2 * rise), yc = y0 + rise - R, L = len / 2;
     const pt = (t) => { const z = -wid / 2 + (wid * t) / segs; return [z, yc + Math.sqrt(Math.max(R * R - z * z, 0))]; };
@@ -491,7 +448,6 @@ class MeshBuilder {
       this.quad(ek, [cx - L, y0, cz + z0], [cx - L, y0, cz + z1], [cx - L, h1, cz + z1], [cx - L, h0, cz + z0], [[z0 / tile, 0], [z1 / tile, 0], [z1 / tile, (h1 - y0) / tile], [z0 / tile, (h0 - y0) / tile]], 0.9);
     }
   }
-  /* cylinder / truncated cone (outward normals); capTop adds a lid */
   cyl(key, cx, cz, r0, r1, y0, y1, segs = 16, tile = 2, capTop = true, col = 1, ao = 0, inward = false) {
     for (let k = 0; k < segs; k++) {
       const a0 = (k / segs) * Math.PI * 2 + ao, a1 = ((k + 1) / segs) * Math.PI * 2 + ao;
@@ -505,20 +461,18 @@ class MeshBuilder {
       this.tri(key, [cx, y1, cz], [cx + Math.cos(a1) * r1, y1, cz + Math.sin(a1) * r1], [cx + Math.cos(a0) * r1, y1, cz + Math.sin(a0) * r1], [[0.5, 0.5], [0.5 + Math.cos(a1) * 0.5, 0.5 + Math.sin(a1) * 0.5], [0.5 + Math.cos(a0) * 0.5, 0.5 + Math.sin(a0) * 0.5]], col);
     }
   }
-  /* sloped slab: top plane rises from yLow (south edge, +z) to yHigh (north edge), with thickness */
   slab(key, cx, cz, w, d, yLow, yHigh, th = 0.25, tile = 2) {
     const x0 = cx - w / 2, x1 = cx + w / 2, zs = cz + d / 2, zn = cz - d / 2;
     const a = [x0, yLow, zs], b = [x1, yLow, zs], c = [x1, yHigh, zn], e = [x0, yHigh, zn];
     const dn = (p) => [p[0], p[1] - th, p[2]];
     const uv = [[0, 0], [w / tile, 0], [w / tile, d / tile], [0, d / tile]];
-    this.quad(key, e, a, b, c, [[0, d / tile], [0, 0], [w / tile, 0], [w / tile, d / tile]], 1);                      // top
-    this.quad(key, dn(a), dn(e), dn(c), dn(b), uv, 0.6);                                                               // bottom
-    this.quad(key, dn(a), dn(b), b, a, [[0, 0], [w / tile, 0], [w / tile, th / tile], [0, th / tile]], 0.9);           // south edge
-    this.quad(key, dn(c), dn(e), e, c, [[0, 0], [w / tile, 0], [w / tile, th / tile], [0, th / tile]], 0.9);           // north edge
-    this.quad(key, dn(b), dn(c), c, b, [[0, 0], [d / tile, 0], [d / tile, th / tile], [0, th / tile]], 0.9);           // east edge
-    this.quad(key, dn(e), dn(a), a, e, [[0, 0], [d / tile, 0], [d / tile, th / tile], [0, th / tile]], 0.9);           // west edge
+    this.quad(key, e, a, b, c, [[0, d / tile], [0, 0], [w / tile, 0], [w / tile, d / tile]], 1);
+    this.quad(key, dn(a), dn(e), dn(c), dn(b), uv, 0.6);
+    this.quad(key, dn(a), dn(b), b, a, [[0, 0], [w / tile, 0], [w / tile, th / tile], [0, th / tile]], 0.9);
+    this.quad(key, dn(c), dn(e), e, c, [[0, 0], [w / tile, 0], [w / tile, th / tile], [0, th / tile]], 0.9);
+    this.quad(key, dn(b), dn(c), c, b, [[0, 0], [d / tile, 0], [d / tile, th / tile], [0, th / tile]], 0.9);
+    this.quad(key, dn(e), dn(a), a, e, [[0, 0], [d / tile, 0], [d / tile, th / tile], [0, th / tile]], 0.9);
   }
-  /* regular n-gon pyramid (ribbed roof / spire) */
   pyramid(key, cx, cz, r, y0, y1, n = 8, tile = 2, col = 1, ao = 0) {
     for (let k = 0; k < n; k++) {
       const a0 = (k / n) * Math.PI * 2 + ao, a1 = ((k + 1) / n) * Math.PI * 2 + ao;
@@ -526,7 +480,6 @@ class MeshBuilder {
         [[1, 0], [0, 0], [0.5, 1]].map(([u, v]) => [u * (r * 2 * Math.sin(Math.PI / n)) / tile, v * Math.hypot(r, y1 - y0) / tile]), col);
     }
   }
-  /* flat circular / elliptical disc facing up */
   disc(key, cx, cz, rx, rz, y, segs = 28, tile = 3, col = 1) {
     for (let k = 0; k < segs; k++) {
       const a0 = (k / segs) * Math.PI * 2, a1 = ((k + 1) / segs) * Math.PI * 2;
@@ -541,7 +494,6 @@ class MeshBuilder {
       this.quad(key, P(a0, rIn), P(a1, rIn), P(a1, rOut), P(a0, rOut), [[0, 0], [0, 1], [1, 1], [1, 0]].map(([u, v]) => [(cx + u * 2) / tile, (cz + v * 2) / tile]), col);
     }
   }
-  /* merge result as plain arrays (scaled to world units by `scale`) */
   arrays(scale = 1) {
     const out = {};
     Object.entries(this.g).forEach(([k, G]) => { out[k] = { p: G.p.map((v) => v * scale), n: G.n, u: G.u, c: G.c, i: G.i }; });
@@ -549,7 +501,6 @@ class MeshBuilder {
   }
 }
 
-/* ---------- geometry helpers ---------- */
 function makeGeo(G) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(G.p), 3));
@@ -570,15 +521,7 @@ function mergeInto(dst, key, G) {
   for (let k = 0; k < G.i.length; k++) D.i.push(G.i[k] + off);
 }
 
-/* =====================================================================
-   Buildings and landmarks
-   ===================================================================== */
 
-const FH = 3.4;
-
-// typical storey height (m)
-
-/* ---------- block (multi-storey / low-rise) generator ---------- */
 function blockDims(p) {
   const minD = p.minD ?? (p.floors >= 3 ? 10 : 6.5);
   return [Math.max(p.w * METERS_PER_PX, p.minW ?? 6), Math.max(p.d * METERS_PER_PX, minD)];
@@ -603,11 +546,9 @@ function buildBlock(b, p, seed = 1) {
     b.box("glassdoor", 0, 0, W * 0.35, D * 0.6, 0, y0 - 0.2, 3, 3, { noTop: true, ao: 1 });
   }
   b.box({ wall: wallKey, top: "roofflat" }, 0, 0, W, D, y0, H, tw, th, { noTop: true, uo: p.uo || 0, vo: 0 });
-  // storey slab bands + optional accent band
   if (p.bands !== false && p.floors > 1) for (let f = 1; f < p.floors; f++) b.box("trim", 0, 0, W + 0.28, D + 0.28, f * fh - 0.14, f * fh + 0.14, 2, 1, { ao: 1 });
-  b.box("trim", 0, 0, W + 0.5, D + 0.5, H - 0.1, H + 0.32, 2, 1, { ao: 1 });                         // cornice / roof edge beam
-  // pilasters (corner / bay piers)
-  if (!p.pilasters && p.floors >= 2 && p.style !== "kubo") {                          // slim corner piers give every multi-storey block a defined edge
+  b.box("trim", 0, 0, W + 0.5, D + 0.5, H - 0.1, H + 0.32, 2, 1, { ao: 1 });
+  if (!p.pilasters && p.floors >= 2 && p.style !== "kubo") {
     const ck = "pier:" + hex();
     [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sz]) => b.box(ck, sx * W / 2, sz * D / 2, 0.7, 0.7, y0, H, 1, 1, { ao: 0.85 }));
   }
@@ -617,7 +558,6 @@ function buildBlock(b, p, seed = 1) {
     if (step) for (let px = -W / 2 + step; px < W / 2 - step / 2; px += step) xs.push(px);
     xs.forEach((px) => { b.box(key, px, D / 2 + 0.08, pw, 0.3, y0, H, 1, 1, { ao: 0.8 }); b.box(key, px, -D / 2 - 0.08, pw, 0.3, y0, H, 1, 1, { ao: 0.8 }); });
   }
-  // balconies / corridors on the south (front) facade
   if (p.balcony) {
     const bw = W - 1.0, by = D / 2 + (p.balcony.depth || 1.5) / 2;
     for (let f = 1; f < p.floors; f++) {
@@ -626,7 +566,6 @@ function buildBlock(b, p, seed = 1) {
     }
   }
   if (p.balconyBack) for (let f = 1; f < p.floors; f++) b.box("slab", 0, -D / 2 - 0.7, W - 1, 1.4, f * fh - 0.25, f * fh, 2, 2, { ao: 1 });
-  // entrance: recessed-looking glazed door, steps, canopy on two columns
   if (p.entrance) {
     const e = p.entrance, ex = (e.x || 0) * (W / 2 - 3), ew = e.w || 3.2, eh = Math.min(fh - 0.6, 3.0);
     const zf = D / 2;
@@ -639,38 +578,35 @@ function buildBlock(b, p, seed = 1) {
       [-1, 1].forEach((s) => b.box("column", ex + s * (ew / 2 + 0.7), zf + 3.2, 0.32, 0.32, 0, y0 + eh + 0.35, 1, 1, { ao: 0.85 }));
     }
   }
-  // roofs
   const r = p.roof || { type: "flat" };
-  let top = H + 0.32;
+  let top;
   if (r.type === "hip") {
     const rise = r.rise ?? Math.min(D * 0.28, 3.4), ov = r.ov ?? 0.9, rk = "roof:" + (r.mat || "maroon");
     top = b.hipRoof(rk, 0, 0, W, D, H + 0.3, rise, ov, undefined, 1.2, "soffit");
-    if (r.skylight) {                                                  // glazed ridge strip (north wing of the Main Academic Building)
-      const sx = Math.max(W - D, 4) * 0.42;
+    if (r.skylight) {
       b.box("skyglass", 0, 0, 0.9, Math.max(W, D) * 0.5, top - 0.06, top + 0.5, 2, 2, { noTop: false, ao: 1 });
-      void sx;
     }
   } else if (r.type === "barrel") {
     top = H + r.rise;
     b.barrel("roof:" + (r.mat || "maroon"), 0, 0, W, D, H, r.rise, 16, 1.2, wallKey);
-  } else {                                                              // flat roof: membrane, parapet, plant
+  } else {
     b.top("roofflat", -W / 2, -D / 2, W / 2, D / 2, H + 0.3, 3, 3);
     const ph = r.parapet ?? 0.9, pk = "parapet:" + hex(r.parapetColor);
     b.box(pk, 0, D / 2 - 0.15, W, 0.3, H + 0.3, H + 0.3 + ph, 3, 1, { ao: 1 });
     b.box(pk, 0, -D / 2 + 0.15, W, 0.3, H + 0.3, H + 0.3 + ph, 3, 1, { ao: 1 });
     b.box(pk, W / 2 - 0.15, 0, 0.3, D - 0.6, H + 0.3, H + 0.3 + ph, 3, 1, { ao: 1 });
     b.box(pk, -W / 2 + 0.15, 0, 0.3, D - 0.6, H + 0.3, H + 0.3 + ph, 3, 1, { ao: 1 });
-    const cpY = H + 0.3 + ph;                                            // coping stones cap the parapet and catch the low sun
+    const cpY = H + 0.3 + ph;
     b.box("coping", 0, D / 2 - 0.15, W + 0.1, 0.46, cpY, cpY + 0.1, 2, 1, { ao: 1 });
     b.box("coping", 0, -D / 2 + 0.15, W + 0.1, 0.46, cpY, cpY + 0.1, 2, 1, { ao: 1 });
     b.box("coping", W / 2 - 0.15, 0, 0.46, D - 0.5, cpY, cpY + 0.1, 2, 1, { ao: 1 });
     b.box("coping", -W / 2 + 0.15, 0, 0.46, D - 0.5, cpY, cpY + 0.1, 2, 1, { ao: 1 });
     top = cpY + 0.1;
-    if (r.inner) {                                                       // inset maroon hip inside the parapet (Ninoy Aquino LRC)
+    if (r.inner) {
       const iw = W - 5, id = D - 5;
       if (iw > 4 && id > 3) top = Math.max(top, b.hipRoof("roof:maroon", 0, 0, iw, id, H + 0.3, Math.min(id * 0.3, 2.4), 0.4, undefined, 1.2, "soffit"));
     }
-    if (r.lightwells) {                                                  // rooftop openings of the rear block (Main Academic Building)
+    if (r.lightwells) {
       const n = r.lightwells, lw = Math.min((W - 8) / n, 14);
       for (let k = 0; k < n; k++) {
         const lx = -W / 2 + (W / (n + 1)) * (k + 1), lz = 0;
@@ -681,11 +617,11 @@ function buildBlock(b, p, seed = 1) {
         b.box("parapet:" + hex("accent"), lx - lw * 0.275, lz, 0.25, D * 0.42, H + 0.3, H + 1.3, 2, 1, { ao: 1 });
       }
     }
-    if (r.solar) {                                                       // PV array on the flat roof (visible in the aerial photo)
+    if (r.solar) {
       const cols = Math.floor((W - 6) / 2.4), rows = Math.max(1, Math.floor((D - 5) / 3.0));
       for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) b.box("solar", -W / 2 + 3.3 + i * 2.4, -D / 2 + 3.2 + j * 3.0, 2.1, 2.5, H + 0.45, H + 0.52, 1, 1, { ao: 1 });
     }
-    if (r.plant !== false) {                                             // stair head, water tank, a few AC units (deterministic per building)
+    if (r.plant !== false) {
       b.box("concrete", -W / 2 + 3.5 + rnd() * (W - 8), (rnd() - 0.5) * (D - 4), 3.2, 3.0, H + 0.3, H + 3.0, 3, 3, { ao: 1 });
       const tx = -W / 2 + 3 + rnd() * (W - 6);
       b.cyl("metal", tx, (rnd() - 0.5) * (D - 5), 0.9, 0.9, H + 0.3, H + 2.0, 12, 2, true);
@@ -696,17 +632,16 @@ function buildBlock(b, p, seed = 1) {
   return { topY: top, cx: x, cz: z, rot: p.rot || 0, w: W, d: D, h: H };
 }
 
-/* ---------- landmark / special-structure builders (metres, local frame at the marker) ---------- */
 const at = (b, px, py, rot = 0) => { const [x, z] = pxToM(px, py); b.place(x, z, rot); return [x, z]; };
 
-function fenceRun(b, x0, z0, x1, z1, h = 2.6, postGap = 3) {                    // chain-link style fence: posts + mesh quad (alpha-tested texture)
+function fenceRun(b, x0, z0, x1, z1, h = 2.6, postGap = 3) {
   const len = Math.hypot(x1 - x0, z1 - z0), n = Math.max(1, Math.round(len / postGap));
   for (let k = 0; k <= n; k++) { const t = k / n; b.box("metal", x0 + (x1 - x0) * t, z0 + (z1 - z0) * t, 0.09, 0.09, 0, h, 1, 1, { noTop: false, ao: 1 }); }
   b.quad("fence", [x0, 0.1, z0], [x1, 0.1, z1], [x1, h, z1], [x0, h, z0], [[0, 0], [len / 1.5, 0], [len / 1.5, h / 1.5], [0, h / 1.5]], 1);
   b.quad("fence", [x1, 0.1, z1], [x0, 0.1, z0], [x0, h, z0], [x1, h, z1], [[0, 0], [len / 1.5, 0], [len / 1.5, h / 1.5], [0, h / 1.5]], 1);
 }
 
-function railRun(b, x0, z0, x1, z1, h = 1.15, postGap = 3.2) {                  // white post-and-rail fence (oval track)
+function railRun(b, x0, z0, x1, z1, h = 1.15, postGap = 3.2) {
   const len = Math.hypot(x1 - x0, z1 - z0), n = Math.max(1, Math.round(len / postGap)), dx = (x1 - x0) / len, dz = (z1 - z0) / len;
   for (let k = 0; k <= n; k++) b.box("whitefence", x0 + (x1 - x0) * (k / n), z0 + (z1 - z0) * (k / n), 0.14, 0.14, 0, h, 1, 1, { ao: 1 });
   [0.55, 0.95].forEach((yy) => {
@@ -721,7 +656,7 @@ function courtFence(b, w, d, h = 3.0) {
   fenceRun(b, -hw, hd, hw, hd, h); fenceRun(b, hw, hd, hw, -hd, h); fenceRun(b, hw, -hd, -hw, -hd, h); fenceRun(b, -hw, -hd, -hw, hd, h);
 }
 
-function hoop(b, x, z, facing) {                                              // basketball goal: pole, backboard, rim
+function hoop(b, x, z, facing) {
   b.box("metal", x, z, 0.16, 0.16, 0, 3.4, 1, 1, { ao: 1 });
   b.box("backboard", x - facing * 0.55, z, 0.06, 1.8, 2.6, 3.65, 1, 1, { ao: 1 });
   b.cyl("metal", x - facing * 0.9, z, 0.23, 0.23, 3.02, 3.06, 10, 1, false);
@@ -729,39 +664,39 @@ function hoop(b, x, z, facing) {                                              //
 
 function buildSpecial(b, id) {
   switch (id) {
-    case 1: {                                                                       // The Pylon: three adjacent concrete slabs, relative heights from the photo
+    case 1: {
       at(b, 1294, 678, -18);
       b.box("plinth", 0, 0, 7.6, 3.8, 0, 0.5, 3, 3, { ao: 1 });
       const hs = [7.6, 7.4, 7.0], names = ["pylonP", "pylonU", "pylonP"];
       hs.forEach((h, k) => {
         const cx = (k - 1) * 1.88, w = 1.8, d = 1.6;
-        b.wall("pylon", cx + w / 2, d / 2, cx + w / 2, -d / 2, 0.5, h, 3, 3);        // east side (swap order: outward = +x)
-        b.wall("pylon", cx - w / 2, -d / 2, cx - w / 2, d / 2, 0.5, h, 3, 3);        // west side
-        b.wall("pylon", cx + w / 2, -d / 2, cx - w / 2, -d / 2, 0.5, h, 3, 3);       // back
+        b.wall("pylon", cx + w / 2, d / 2, cx + w / 2, -d / 2, 0.5, h, 3, 3);
+        b.wall("pylon", cx - w / 2, -d / 2, cx - w / 2, d / 2, 0.5, h, 3, 3);
+        b.wall("pylon", cx + w / 2, -d / 2, cx - w / 2, -d / 2, 0.5, h, 3, 3);
         b.top("pylon", cx - w / 2, -d / 2, cx + w / 2, d / 2, h, 3, 3);
         b.quad(names[k], [cx - w / 2, 0.5, d / 2], [cx + w / 2, 0.5, d / 2], [cx + w / 2, h, d / 2], [cx - w / 2, h, d / 2], [[0, 0], [1, 0], [1, (h - 0.5) / 7.6], [0, (h - 0.5) / 7.6]], [[0.8, 0.8, 0.8], [0.8, 0.8, 0.8], [1, 1, 1], [1, 1, 1]]);
       });
       return { topY: 7.9 };
     }
-    case 2: {                                                                       // The Mural: terracotta wall carrying a bronze relief band
+    case 2: {
       at(b, 1205, 699, -18);
       b.box("plinth", 0, 0, 10.6, 0.8, 0, 0.35, 3, 3, { ao: 1 });
       b.box({ wall: "muralwall", top: "concrete" }, 0, 0, 10.2, 0.5, 0.35, 3.1, 3, 3, { ao: 0.8 });
       b.box("relief", 0, 0.3, 9.0, 0.14, 0.9, 2.5, 3, 3, { noTop: false, ao: 1 });
       return { topY: 3.4 };
     }
-    case 3: case 7: case 9: return null;                                            // handled as blocks
-    case 8: {                                                                       // Mabini Shrine: raised teal bahay-kubo with steep thatched hip roof
+    case 3: case 7: case 9: return null;
+    case 8: {
       at(b, 835, 489, 0);
       [[-2.6, -2.0], [2.6, -2.0], [-2.6, 2.0], [2.6, 2.0], [0, -2.0], [0, 2.0]].forEach(([x, z]) => b.cyl("wood", x, z, 0.13, 0.13, 0, 1.45, 8, 2, true));
       b.box("wood", 0, 0, 6.4, 5.2, 1.4, 1.6, 2, 2, { ao: 1 });
       b.box({ wall: "wall:kubo", top: "wood" }, 0, 0, 5.6, 4.4, 1.6, 4.0, 2.0, 2.4, { noTop: true, ao: 1 });
       b.hipRoof("roof:thatch", 0, 0, 5.6, 4.4, 4.0, 4.6, 1.2, true, 1.2, "soffit");
       for (let k = 0; k < 4; k++) b.box("wood", 0, 2.9 + (3 - k) * 0.32, 1.6, 0.34, 0, 0.4 * (k + 1), 1, 1, { ao: 1 });
-      b.box("concrete", 5.2, 3.2, 1.0, 1.0, 0, 1.35, 1, 1, { ao: 1 });               // white pedestal beside the house (reference photo)
+      b.box("concrete", 5.2, 3.2, 1.0, 1.0, 0, 1.35, 1, 1, { ao: 1 });
       return { topY: 8.6 };
     }
-    case 10: {                                                                      // Obelisk on a circular stepped platform, with flagpole (reference photo)
+    case 10: {
       at(b, 886, 452, 0);
       b.cyl("concrete", 0, 0, 5.0, 5.0, 0, 0.3, 28, 3, true); b.cyl("concrete", 0, 0, 4.2, 4.2, 0.3, 0.62, 28, 3, true);
       b.box("concrete", 0, 0, 1.8, 1.8, 0.62, 1.4, 2, 2, { ao: 1 });
@@ -770,13 +705,13 @@ function buildSpecial(b, id) {
       b.cyl("metal", 3.0, -0.6, 0.06, 0.05, 0.62, 12.0, 8, 1, true);
       return { topY: 12.4 };
     }
-    case 11: {                                                                      // Freedom Park: herringbone brick plaza with concrete benches (reference photo)
+    case 11: {
       at(b, 683, 473, 8);
       b.box({ wall: "concrete", top: "brick" }, 0, 0, 15, 8, 0, 0.14, 3, 3, { ao: 1, rtw: 2.4, rth: 2.4 });
       [[-4.5, 3.3, 0], [4.5, 3.3, 0], [-4.5, -3.3, Math.PI], [4.5, -3.3, Math.PI]].forEach(([x, z]) => b.box("concrete", x, z, 1.9, 0.5, 0.14, 0.56, 1, 1, { ao: 1 }));
       return { topY: 0.6 };
     }
-    case 12: {                                                                      // Fountain Park: stone-rimmed circular tile pool with dark stone sculptures
+    case 12: {
       at(b, 566, 512, 0);
       b.cyl("stone", 0, 0, 5.4, 5.4, 0, 1.0, 36, 2, false);
       b.ring("stone", 0, 0, 4.3, 5.4, 1.0, 36, 2);
@@ -785,7 +720,7 @@ function buildSpecial(b, id) {
       [[-0.9, 0.2, 3.2], [0.2, -0.5, 2.8], [1.0, 0.5, 2.4]].forEach(([x, z, h]) => b.box("darkstone", x, z, 0.9, 0.7, 0.55, 0.55 + h, 1, 1, { ao: 1 }));
       return { topY: 3.6 };
     }
-    case 13: {                                                                      // Inter Faith Chapel: octagonal ribbed tent roof with spire + low entrance canopy (aerial)
+    case 13: {
       at(b, 330, 480, 0);
       b.cyl("plinth", 0, 0, 12.8, 12.8, 0, 0.5, 8, 3, true, 1, Math.PI / 8);
       b.cyl("wall:whitehall", 0, 0, 11.2, 11.2, 0.5, 3.4, 8, 5.0, false, 1, Math.PI / 8);
@@ -796,15 +731,15 @@ function buildSpecial(b, id) {
       [[-3.6, -1.6], [3.6, -1.6], [-3.6, 1.6], [3.6, 1.6]].forEach(([x, z]) => b.box("column", x, z, 0.3, 0.3, 0, 3.6, 1, 1, { ao: 1 }));
       return { topY: 17.2, anchorY: 4.2 };
     }
-    case 15: {                                                                      // Gazebo: open hexagonal pavilion
+    case 15: {
       at(b, 116, 436, 0);
       b.cyl("concrete", 0, 0, 3.2, 3.2, 0, 0.28, 6, 2, true);
       for (let k = 0; k < 6; k++) { const a = (k / 6) * Math.PI * 2; b.box("column", Math.cos(a) * 2.5, Math.sin(a) * 2.5, 0.22, 0.22, 0.28, 2.9, 1, 1, { ao: 1 }); }
       b.pyramid("roof:maroon", 0, 0, 3.8, 2.9, 4.7, 6, 1.2, 1);
       return { topY: 4.9 };
     }
-    case 16: {                                                                      // Grandstand: raked seating tiers under a long cantilevered canopy (reference photo)
-      const [x, z] = at(b, 718, 545, 2);
+    case 16: {
+      at(b, 718, 545, 2);
       const L = 40, Dp = 10;
       for (let t = 0; t < 7; t++) b.box({ wall: "seat", top: "seat" }, 0, Dp / 2 - 0.7 - t * 1.05, L, 1.05, 0, 0.45 * (t + 1), 3, 3, { ao: 0.85 });
       b.box({ wall: "wall:whitehall", top: "concrete" }, 0, -Dp / 2 + 0.3, L, 0.6, 0, 5.6, 5, 4, { ao: 0.8 });
@@ -813,14 +748,14 @@ function buildSpecial(b, id) {
       b.box("concrete", 0, Dp / 2 + 0.4, L, 0.5, 0, 0.9, 3, 3, { ao: 1 });
       return { topY: 7.0 };
     }
-    case 25: {                                                                      // Linear Park: paved strip with the stone sign (reference photo)
+    case 25: {
       at(b, 630, 262, 0);
       b.box({ wall: "concrete", top: "pavers" }, 0, 0, 13, 2.6, 0, 0.12, 3, 3, { ao: 1, rtw: 2, rth: 2 });
       b.box("concrete", -4.8, -1.0, 3.4, 0.45, 0.12, 1.6, 3, 3, { ao: 0.85 });
       b.box("signplate", -4.8, -0.76, 2.6, 0.06, 0.4, 1.3, 2.6, 0.9, { ao: 1 });
       return { topY: 1.8 };
     }
-    case 29: {                                                                      // Water Tower: slender concrete shaft carrying a flared drum tank (reference photo)
+    case 29: {
       at(b, 869, 252, 0);
       b.cyl("tower", 0, 0, 2.6, 2.6, 0, 0.5, 20, 3, true);
       b.cyl("tower", 0, 0, 1.7, 1.25, 0.5, 14.5, 20, 3, false);
@@ -830,7 +765,7 @@ function buildSpecial(b, id) {
       b.cyl("metal", 0, 0, 0.5, 0.5, 21.4, 22.0, 10, 1, true);
       return { topY: 22.0 };
     }
-    case 32: {                                                                      // Amphitheater: stepped semicircular seating facing a stage (reference photo)
+    case 32: {
       at(b, 581, 363, 200);
       const rows = 6, r0 = 3.0, rs = 0.95, SEG = 14;
       for (let j = 0; j < rows; j++) {
@@ -845,7 +780,7 @@ function buildSpecial(b, id) {
       b.box("stagefloor", 0, -1.2, 6.5, 4.2, 0, 0.35, 3, 3, { ao: 1 });
       return { topY: 2.2 };
     }
-    case 37: {                                                                      // Swimming pool: terracotta deck, coping, teal water, covered stand on the north side (ref photo)
+    case 37: {
       at(b, 1125, 425, 22);
       const W = 33, D = 12.5;
       b.box({ wall: "concrete", top: "deckpink" }, 0, 0, W + 8, D + 7, 0, 0.14, 3, 3, { ao: 1, rtw: 1.5, rth: 1.5 });
@@ -855,7 +790,7 @@ function buildSpecial(b, id) {
       b.box("concreteWhite", 0, -D / 2 - 2.9, W + 1, 3.2, 3.6, 3.9, 3, 3, { ao: 1 });
       return { topY: 4.2 };
     }
-    case 38: {                                                                      // Multi-Purpose Building: steel-truss hall under a maroon barrel vault, glazed front, red columns
+    case 38: {
       at(b, 1324, 468, 21.3);
       const L = 63, D = 20.5, hallH = 7.0, wallKey = "wall:whitemod";
       b.box({ wall: "plinth", top: "plinth" }, 0, 0, L + 0.5, D + 0.5, 0, 0.5, 3, 3, { ao: 1 });
@@ -867,7 +802,7 @@ function buildSpecial(b, id) {
       b.box("door", 0, D / 2 + 0.06, L * 0.8, 0.12, 0.3, 3.6, 3, 3, { noTop: true, ao: 1 });
       return { topY: hallH + 5.6 };
     }
-    case 45: {                                                                      // NDC covered court: open-sided vaulted steel roof over a coloured court (reference photo)
+    case 45: {
       at(b, 1334, 129, 0);
       const L = 24, Wd = 14;
       b.box({ wall: "courtred", top: "courtred" }, 0, 0, L, Wd, 0, 0.12, 4, 4, { ao: 1, rtw: 4, rth: 4 });
@@ -875,7 +810,7 @@ function buildSpecial(b, id) {
       b.barrel("roof:steel", 0, 0, L + 1, Wd + 1, 6.2, 2.8, 12, 1.2);
       return { topY: 9.0 };
     }
-    case 4: case 5: case 6: case 44: {                                              // court fence and playing surface share one canonical layout
+    case 4: case 5: case 6: case 44: {
       const C = COURT_LAYOUT.find((court) => court.id === id);
       at(b, C.x, C.y, C.rot);
       const w = C.w * METERS_PER_PX, d = Math.max(C.d * METERS_PER_PX, 8);
@@ -895,7 +830,7 @@ function buildBoundary(b, runs = STREET_WALL, curb = true) {
       const len = Math.hypot(x1 - x0, z1 - z0), dx = (x1 - x0) / len, dz = (z1 - z0) / len, nx = -dz, nz = dx;
       const t = 0.18;
       const A = [x0 - nx * t, z0 - nz * t], B = [x1 - nx * t, z1 - nz * t], C = [x1 + nx * t, z1 + nz * t], D = [x0 + nx * t, z0 + nz * t];
-      b.wall("wallred", B[0], B[1], A[0], A[1], 0, 1.35, 3, 1.35);                  // outward faces (both sides)
+      b.wall("wallred", B[0], B[1], A[0], A[1], 0, 1.35, 3, 1.35);
       b.wall("wallred", D[0], D[1], C[0], C[1], 0, 1.35, 3, 1.35);
       b.quad("concrete", [A[0], 1.35, A[1]], [D[0], 1.35, D[1]], [C[0], 1.35, C[1]], [B[0], 1.35, B[1]], [[0, 0], [0, 1], [len / 3, 1], [len / 3, 0]], 1);
       if (curb) b.quad("curb", [x0 + nx * 0.2, 0.17, z0 + nz * 0.2], [x0 + nx * 0.7, 0.17, z0 + nz * 0.7], [x1 + nx * 0.7, 0.17, z1 + nz * 0.7], [x1 + nx * 0.2, 0.17, z1 + nz * 0.2], [[0, 0], [1, 0], [1, len / 3], [0, len / 3]], 1);
@@ -905,16 +840,13 @@ function buildBoundary(b, runs = STREET_WALL, curb = true) {
   });
 }
 
-/* ---------- buildings, landmarks, boundary: merged per material, per-building meshes only for walls/roofs ---------- */
 const ALLPARTS = [];
-const LOC_GROUND_MATS = {};   // location id -> materials of its ground-level surfaces (court surfaces, running track), highlighted with the rest of the structure
+const LOC_GROUND_MATS = {};
 
 function buildCampus() {
   const GL = {}, rec = {};
   const addBuilder = (b, group, mats, standalone = false) => {
     const entries = Object.entries(b.arrays(M));
-    // A location with no wall or roof of its own (court, plaza, pool, tower, ...) keeps every surface as its own mesh instead of merging it
-    // into the shared campus meshes, so it can be highlighted on selection exactly like a building. Shadow flags match the merged meshes.
     const whole = standalone && !entries.some(([key]) => key.startsWith("wall:") || key.startsWith("roof:"));
     entries.forEach(([key, G]) => {
       if (whole || key.startsWith("wall:") || key.startsWith("roof:")) {
@@ -939,10 +871,10 @@ function buildCampus() {
   const ctx = new MeshBuilder();
   CONTEXT_BLOCKS.forEach((p, i) => { const r = buildBlock(ctx, p, 9000 + i); ALLPARTS.push({ id: 0, ...r }); });
   { const [x, z] = pxToM(562, 114); ctx.place(x, z, 0); for (let k = -2; k <= 2; k++) ctx.box("concreteWhite", k * 5.5, 56 * METERS_PER_PX / 2 + 2.2, 0.9, 0.9, 0, 14.5, 2, 2, { ao: 0.9 }); ctx.box("concreteWhite", 0, 56 * METERS_PER_PX / 2 + 2.2, 28, 1.6, 14.5, 15.6, 3, 3, { ao: 1 }); }
-  buildBoundary(ctx, STREET_WALL, false);                                   // the street side is finished by buildStreet (sidewalk, road); the other sides follow the same wall
+  buildBoundary(ctx, STREET_WALL, false);
   buildBoundary(ctx, PERIMETER_RUNS, false);
   { const rn = (a) => pxToM(668 + 428 * Math.sign(Math.cos(a)) * Math.pow(Math.abs(Math.cos(a)), 0.74), 672 + 105 * Math.sign(Math.sin(a)) * Math.pow(Math.abs(Math.sin(a)), 0.74));
-    ctx.place(0, 0, 0); let prev = null;                                      // white post-and-rail fence round the running track (visible in the aerial photo)
+    ctx.place(0, 0, 0); let prev = null;
     for (let k = 0; k <= 64; k++) { const a = Math.PI * 0.9 + ((Math.PI * 1.45) * k) / 64, pt = rn(a); if (prev) railRun(ctx, prev[0], prev[1], pt[0], pt[1]); prev = pt; } }
   const ground = new THREE.Group();
   addBuilder(ctx, ground, []);
@@ -955,11 +887,6 @@ function buildCampus() {
   return rec;
 }
 
-/* =====================================================================
-   Ground
-   ===================================================================== */
-
-/* Flat, independently positioned ground ribbon. Width is measured in source-map pixels. */
 function addGroundRibbon(points, widthPx, materialKey, y = 0.025) {
   if (!points || points.length < 2 || widthPx <= 0) return null;
   const centers = points.map(([x, z]) => groundWorldPoint(x, z, y));
@@ -1038,7 +965,6 @@ function addCourtSurface(cx, cy, widthPx, depthPx, rotation, isTennis = false, l
   const center = groundWorldPoint(cx, cy, 0.035);
   const group = new THREE.Group();
   group.position.copy(center);
-  // Match the rotation convention used by MeshBuilder.place().
   group.rotation.y = -(rotation || 0) * Math.PI / 180;
   const geo = new THREE.PlaneGeometry(widthPx * WORLD_W / IMAGE_WIDTH, depthPx * WORLD_W / IMAGE_WIDTH);
   const mat = new THREE.MeshStandardMaterial({ map: makeCourtTexture(isTennis), roughness: 0.94, metalness: 0, side: THREE.DoubleSide });
@@ -1076,9 +1002,7 @@ function addBuildingGroundPads() {
   CONTEXT_BLOCKS.forEach(addPad);
 }
 
-/* ---------- procedural campus ground: terrain, track, courts and walkways ---------- */
 function buildGround() {
-  // Neutral, procedurally textured terrain replaces the baked aerial photograph.
   const grassMap = makeProceduralGrassTexture(11, 6);
   const grassMat = new THREE.MeshStandardMaterial({ map: grassMap, roughness: 1, metalness: 0 });
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(WORLD_W, WORLD_H), grassMat);
@@ -1086,7 +1010,6 @@ function buildGround() {
   ground.receiveShadow = true;
   scene.add(ground);
 
-  // A broad, softly textured outer terrain keeps the map edge from reading as a hard rectangle.
   const outerMap = makeProceduralGrassTexture(220, 220);
   const outer = new THREE.Mesh(new THREE.PlaneGeometry(3000, 3000), new THREE.MeshStandardMaterial({ map: outerMap, roughness: 1, metalness: 0 }));
   outer.rotation.x = -Math.PI / 2;
@@ -1094,28 +1017,20 @@ function buildGround() {
   outer.receiveShadow = true;
   scene.add(outer);
 
-  // Large soft tonal patches (fresher and drier grass) break up the repeating lawn tile so the ground reads as living turf.
   const patches = new THREE.Mesh(new THREE.PlaneGeometry(WORLD_W, WORLD_H), new THREE.MeshStandardMaterial({ map: makeGroundPatchTexture(), transparent: true, roughness: 1, metalness: 0, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
   patches.rotation.x = -Math.PI / 2; patches.position.y = 0.004; patches.receiveShadow = true; patches.renderOrder = 1;
   scene.add(patches);
 
-  // Main oval athletics track. The superellipse follows the existing fence alignment.
-  LOC_GROUND_MATS[17] = [   // the track belongs to location 17 (Oval): each band gets its own material copy so it can be highlighted
+  LOC_GROUND_MATS[17] = [
     addOvalGroundBand(668, 672, 420, 98, 394, 72, "track", 0.022),
     addOvalGroundBand(668, 672, 414.5, 92.5, 412.5, 90.5, "trackMark", 0.024),
     addOvalGroundBand(668, 672, 401.5, 79.5, 399.5, 77.5, "trackMark", 0.024)
   ].map((mesh) => (mesh.material = mesh.material.clone()));
 
-  // Court surfaces use the same dimensions, centers, and rotations as their fences.
   COURT_LAYOUT.forEach((court) => addCourtSurface(court.x, court.y, court.w, court.d, court.rot, court.kind === "tennis", court.id));
 
-  // Light, low-profile paved aprons and short entrance walks are derived from the building footprints.
   addBuildingGroundPads();
 }
-
-/* =====================================================================
-   Spatial coordination
-   ===================================================================== */
 
 const createdPedestrianLinks = [];
 
@@ -1195,8 +1110,6 @@ function runSpatialAudit() {
     ALLPARTS.forEach((pt) => { if (pt.id !== court.id && rectsOverlap(rect, partRect(pt), 0.12)) courtBuildingCollisions.push({ court: court.id, building: pt.id }); });
   }
 
-  // Larger special footprints are approximate because source aerial measurements are not surveyed.
-  // These are warnings for reference-based review, never automatic relocation instructions.
   const specialFootprints = [
     { id: 16, name: "Grandstand", x: 718, y: 545, w: 41.2, d: 10.8, rot: 2 },
     { id: 29, name: "Water Tower", x: 869, y: 252, w: 9.2, d: 9.2, rot: 0 },
@@ -1232,15 +1145,10 @@ function runSpatialAudit() {
   return report;
 }
 
-/* =====================================================================
-   Street, surroundings and campus trails
-   ===================================================================== */
-
 const MPP = METERS_PER_PX;
-const CAMPUS_HALF = [(IMAGE_WIDTH * MPP) / 2, (IMAGE_HEIGHT * MPP) / 2];                       // half extents of the mapped campus, in metres
+const CAMPUS_HALF = [(IMAGE_WIDTH * MPP) / 2, (IMAGE_HEIGHT * MPP) / 2];
 const mToPx = (x, z) => [x / MPP + IMAGE_WIDTH / 2, z / MPP + IMAGE_HEIGHT / 2];
 
-/* Anonas Street frame: local x (u) runs along the boundary wall, local z (v) points out across the street. The wall itself is at v = 0. */
 const ST = (() => {
   const run = STREET_WALL[STREET_WALL.length - 1], a = pxToM(...STREET_WALL[0][0]), b = pxToM(...run[run.length - 1]);
   const len = Math.hypot(b[0] - a[0], b[1] - a[1]), dx = (b[0] - a[0]) / len, dz = (b[1] - a[1]) / len;
@@ -1249,29 +1157,27 @@ const ST = (() => {
 const stToWorld = (u, v) => [ST.ox + ST.dx * u + ST.nx * v, ST.oz + ST.dz * u + ST.nz * v];
 const stFromWorld = (x, z) => { const rx = x - ST.ox, rz = z - ST.oz; return [rx * ST.dx + rz * ST.dz, rx * ST.nx + rz * ST.nz]; };
 
-/* The same red-and-white wall continues round the rest of the campus (photo pixels, just inside the mapped area). It joins the street wall at both ends. */
 const PERIMETER_RUNS = [[[1694, 569], [1694, 4], [4, 4], [4, 922], [403, 922], [440, 912]]];
-const GATE_U = [168, 206];                                                                       // the gate opening in the street wall (the Pylon and the Mural stand in it)
-const URBAN_TREES = [];                                                                          // trees (metres) contributed by the street, boundary and surroundings; planted by addTrees
-const createdTrails = [];                                                                        // trail segments in photo px, kept clear of new trees
+const GATE_U = [168, 206];
+const URBAN_TREES = [];
+const createdTrails = [];
 
-/* ---------- Anonas Street: sidewalks, roadway, markings, lamps, street trees, gate forecourt ---------- */
 function buildStreet(b) {
   b.place(ST.ox, ST.oz, ST.deg);
   const U0 = -560, U1 = 820;
   const slab = (key, u0, u1, v0, v1, y1, tile) => b.box({ wall: "curb", top: key }, (u0 + u1) / 2, (v0 + v1) / 2, u1 - u0, v1 - v0, -0.15, y1, tile, tile, { ao: 1, rtw: tile, rth: tile });
-  slab("pavement", U0, GATE_U[0], 0.2, 3.3, 0.2, 3); slab("pavement", GATE_U[1], U1, 0.2, 3.3, 0.2, 3);   // inner sidewalk, split at the gate
-  slab("pavers", GATE_U[0], GATE_U[1], -6, 3.3, 0.06, 2);                                                   // paved forecourt through the gate
-  slab("asphalt", U0, U1, 3.3, 16.1, 0.05, 6);                                                              // roadway
-  slab("pavement", U0, U1, 16.1, 19.4, 0.2, 3);                                                             // far sidewalk
+  slab("pavement", U0, GATE_U[0], 0.2, 3.3, 0.2, 3); slab("pavement", GATE_U[1], U1, 0.2, 3.3, 0.2, 3);
+  slab("pavers", GATE_U[0], GATE_U[1], -6, 3.3, 0.06, 2);
+  slab("asphalt", U0, U1, 3.3, 16.1, 0.05, 6);
+  slab("pavement", U0, U1, 16.1, 19.4, 0.2, 3);
   const line = (key, u0, u1, v0, v1) => b.top(key, u0, v0, u1, v1, 0.06, 4, 4);
   const zebra = [181, 193];
-  line("roadline", U0, U1, 3.65, 3.8); line("roadline", U0, U1, 15.6, 15.75);                              // edge lines
-  line("roadyellow", U0, zebra[0] - 1, 9.55, 9.69); line("roadyellow", U0, zebra[0] - 1, 9.71, 9.85);        // double centre line
+  line("roadline", U0, U1, 3.65, 3.8); line("roadline", U0, U1, 15.6, 15.75);
+  line("roadyellow", U0, zebra[0] - 1, 9.55, 9.69); line("roadyellow", U0, zebra[0] - 1, 9.71, 9.85);
   line("roadyellow", zebra[1] + 1, U1, 9.55, 9.69); line("roadyellow", zebra[1] + 1, U1, 9.71, 9.85);
-  for (let u = U0; u < U1; u += 9) if (u < zebra[0] - 4 || u > zebra[1] + 1) { line("roadline", u, u + 3, 6.4, 6.52); line("roadline", u, u + 3, 12.9, 13.02); }   // lane dashes
-  for (let k = 0; k < 12; k++) line("roadline", zebra[0] + k, zebra[0] + k + 0.5, 4.1, 15.3);              // pedestrian crossing at the gate
-  for (let u = U0 + 14; u < U1; u += 28) {                                                                  // street lamps, one side each, staggered
+  for (let u = U0; u < U1; u += 9) if (u < zebra[0] - 4 || u > zebra[1] + 1) { line("roadline", u, u + 3, 6.4, 6.52); line("roadline", u, u + 3, 12.9, 13.02); }
+  for (let k = 0; k < 12; k++) line("roadline", zebra[0] + k, zebra[0] + k + 0.5, 4.1, 15.3);
+  for (let u = U0 + 14; u < U1; u += 28) {
     if (u > GATE_U[0] - 6 && u < GATE_U[1] + 6) continue;
     b.cyl("metal", u, 18.5, 0.1, 0.07, 0.2, 7.4, 8, 2, false);
     b.box("metal", u, 17.7, 0.1, 1.7, 7.25, 7.37, 1, 1, { ao: 1 }); b.box("canopy", u, 16.9, 0.4, 0.9, 7.1, 7.28, 1, 1, { ao: 1 });
@@ -1281,16 +1187,16 @@ function buildStreet(b) {
     b.box("metal", u2, 3.1, 0.1, 1.7, 7.25, 7.37, 1, 1, { ao: 1 }); b.box("canopy", u2, 3.9, 0.4, 0.9, 7.1, 7.28, 1, 1, { ao: 1 });
   }
   const trng = seeded(31);
-  for (let u = U0 + 5; u < U1; u += 15) {                                                                   // street trees on both sidewalks
+  for (let u = U0 + 5; u < U1; u += 15) {
     if (!(u > GATE_U[0] - 10 && u < GATE_U[1] + 10)) { const [x, z] = stToWorld(u + trng() * 3, 1.8); URBAN_TREES.push({ x, z, r: 3 + trng() * 1.2 }); }
     const [x2, z2] = stToWorld(u + 7 + trng() * 3, 17.9); URBAN_TREES.push({ x: x2, z: z2, r: 3 + trng() * 1.2 });
   }
   const prng = seeded(53);
-  PERIMETER_RUNS.forEach((run) => {                                                                         // a planted strip just outside the boundary wall
+  PERIMETER_RUNS.forEach((run) => {
     for (let i = 0; i < run.length - 1; i++) {
       const a = pxToM(...run[i]), c = pxToM(...run[i + 1]), len = Math.hypot(c[0] - a[0], c[1] - a[1]), dx = (c[0] - a[0]) / len, dz = (c[1] - a[1]) / len;
       for (let t = 4; t < len - 4; t += 11 + prng() * 4) {
-        const px = a[0] + dx * t, pz = a[1] + dz * t, nx = -dz, nz = dx, sgn = nx * px + nz * pz >= 0 ? 1 : -1;   // outward normal: away from the campus centre
+        const px = a[0] + dx * t, pz = a[1] + dz * t, nx = -dz, nz = dx, sgn = nx * px + nz * pz >= 0 ? 1 : -1;
         const x = px + nx * sgn * 5.5, z = pz + nz * sgn * 5.5;
         if (stFromWorld(x, z)[1] > -6) continue;
         URBAN_TREES.push({ x, z, r: 3.2 + prng() * 1.3 });
@@ -1299,9 +1205,6 @@ function buildStreet(b) {
   });
 }
 
-/* ---------- surrounding urban fabric ----------
-   Blocks follow the street grid (rows parallel to Anonas Street) and reuse the campus facade palette, so the neighbourhood speaks the same architectural
-   language. Close blocks get the full building generator; the far field uses a light version, and everything fades into the horizon haze. */
 function liteBlock(b, x, z, rot, w, d, floors, style, hip) {
   const st = FACADE[style], H = floors * st.th;
   b.place(x, z, rot);
@@ -1319,16 +1222,14 @@ function planSurroundings(near, far) {
     const lv = side > 0 ? 21.5 + d / 2 + k * RV : -(7 + d / 2 + k * RV);
     const [x, z] = stToWorld(lu, lv), dist = Math.hypot(x, z), r = Math.hypot(w, d) / 2;
     if (dist > 1550) continue;
-    if (side < 0 && Math.abs(x) < hx + 16 + r * 0.7 && Math.abs(z) < hz + 16 + r * 0.7) continue;         // the campus and its boundary strip stay clear
+    if (side < 0 && Math.abs(x) < hx + 16 + r * 0.7 && Math.abs(z) < hz + 16 + r * 0.7) continue;
     const roll = rnd(), openLot = side > 0 && k === 0 && lu + w / 2 > GATE_U[0] - 10 && lu - w / 2 < GATE_U[1] + 10;
-    if (openLot || roll > (dist < 300 ? 0.8 : 0.9) - 0.3 * Math.min(1, dist / 1400)) {                                       // parks and open lots between the blocks
+    if (openLot || roll > (dist < 300 ? 0.8 : 0.9) - 0.3 * Math.min(1, dist / 1400)) {
       if (!openLot && rnd() < 0.55) continue;
-      if (dist > 800) continue;                                                                          // far parks stay empty: their trees would be lost in the haze anyway
+      if (dist > 800) continue;
       for (let t = 0, n = 3 + ((rnd() * 4) | 0); t < n; t++) URBAN_TREES.push({ x: x + (rnd() - 0.5) * w, z: z + (rnd() - 0.5) * d, r: 3 + rnd() * 2.6 });
       continue;
     }
-    /* the neighbourhood rises gently with distance (low houses and shophouses beside the campus, mid-rise further out, a few towers on the skyline),
-       so the campus stays the visual focus and the surroundings frame it instead of competing with it */
     const maxF = dist < 260 ? 3 : dist < 520 ? 4 : dist < 900 ? 6 : 8;
     let floors = 2 + Math.floor(Math.pow(rnd(), 1.4) * (maxF - 1)), bw = w, bd = d;
     if (dist > 650 && rnd() < 0.05) { floors = 9 + ((rnd() * 6) | 0); bw = 16 + rnd() * 6; bd = 16 + rnd() * 6; }
@@ -1352,7 +1253,7 @@ function buildStreetAndSurroundings() {
   planSurroundings(near, far);
   const flush = (b, cast, receive) => Object.entries(b.arrays(M)).forEach(([key, G]) => {
     let mat = materialFor(key);
-    if (key.startsWith("road")) mat = decals[key] || (decals[key] = Object.assign(materialFor(key).clone(), { polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));   // markings sit on the asphalt without flicker
+    if (key.startsWith("road")) mat = decals[key] || (decals[key] = Object.assign(materialFor(key).clone(), { polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
     const mesh = new THREE.Mesh(makeGeo(G), mat);
     mesh.castShadow = cast && key !== "fence"; mesh.receiveShadow = receive;
     scene.add(mesh);
@@ -1362,7 +1263,6 @@ function buildStreetAndSurroundings() {
   flush(far, false, false);
 }
 
-/* ---------- campus trails: straight footpaths between neighbouring landmarks and entrances, only where nothing is in the way ---------- */
 const TRAIL_LINKS = [[1, 3], [3, 7], [9, 8], [8, 10], [12, 13], [13, 14], [14, 21], [24, 25], [25, 26], [26, 27], [29, 30], [30, 34], [30, 31], [34, 35], [33, 11], [38, 39], [40, 41], [41, 42], [20, 15]];
 const TRAIL_SPECIALS = [[16, 718, 545, 45.2, 14.8, 2], [37, 1125, 425, 41, 19.5, 22], [38, 1324, 468, 64.2, 23.5, 21.3], [32, 581, 363, 19, 16, 200], [45, 1334, 129, 25, 15, 0], [12, 566, 512, 12, 12, 0],
   [11, 683, 473, 16, 9, 8], [10, 886, 452, 11, 11, 0], [8, 835, 489, 9, 8, 0], [13, 330, 480, 15, 15, 0], [29, 869, 252, 10, 10, 0], [25, 630, 262, 14, 4, 0], [1, 1294, 678, 9, 5, -18], [2, 1205, 699, 11, 3, -18], [15, 116, 436, 8, 8, 0]];
@@ -1383,16 +1283,10 @@ function addCampusTrails() {
   });
 }
 
-/* =====================================================================
-   Environment: sky, lighting, shadows, trees
-   ===================================================================== */
-
-/* ---------- golden-hour constants ---------- */
-const SUN = [0.60, 0.24, 0.52];                                                   // low sun from the south-east (about 17 degrees above the horizon)
-const HAZE = [238, 178, 128];                                                      // horizon haze; the scene fog uses this exact colour so the ground melts into the sky
+const SUN = [0.60, 0.24, 0.52];
+const HAZE = [238, 178, 128];
 const HAZE_HEX = (HAZE[0] << 16) | (HAZE[1] << 8) | HAZE[2];
 
-/* vertical colour ramp of the dusk sky, by elevation in degrees: haze gold at the horizon, then coral, rose, orchid, violet and deep indigo */
 const SKY_RAMP = [[-90, [70, 48, 40]], [-14, [120, 82, 62]], [-6, [205, 148, 108]], [-3, HAZE], [1, HAZE], [3.5, [244, 162, 114]], [8, [236, 134, 118]], [15, [208, 114, 140]],
   [25, [164, 104, 160]], [38, [112, 94, 160]], [55, [68, 72, 136]], [75, [40, 50, 106]], [90, [28, 38, 92]]];
 
@@ -1419,18 +1313,12 @@ function fbm(x, y, oct) {
   return s;
 }
 
-/* Paints the whole sky dome into an equirectangular canvas (u = azimuth, v = elevation; same convention as three.js):
-   1. a per-pixel base of the dusk ramp, the sun's layered glow and disc, an orange horizon band and a faint pink counter-glow opposite the sun;
-   2. two cloud decks computed on perspective-projected planes (so they shrink and converge toward the horizon) and lit from the sun's side:
-      a low, broken deck with glowing edges and violet undersides, and a high, stretched cirrus veil;
-   3. three hazy ridge lines at the horizon for depth. */
 function paintSky(c) {
   const W = c.width, H = c.height, g = c.getContext("2d"), D = 180 / Math.PI;
   const sn = Math.hypot(...SUN), sd = SUN.map((v) => v / sn), sunAz = Math.atan2(sd[2], sd[0]);
   const mix = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
-  const wrapDeg = (a) => Math.abs(((a + Math.PI * 3) % (Math.PI * 2)) - Math.PI) * D;          // angular distance between azimuths, 0..180
+  const wrapDeg = (a) => Math.abs(((a + Math.PI * 3) % (Math.PI * 2)) - Math.PI) * D;
 
-  /* 1. base sky */
   const bw = 512, bh = 256, base = cvs(bw, bh), bg = base.getContext("2d"), bim = bg.createImageData(bw, bh), bd = bim.data;
   for (let y = 0; y < bh; y++) {
     const el = (0.5 - (y + 0.5) / bh) * Math.PI, e = el * D, ce = Math.cos(el), dy = Math.sin(el);
@@ -1439,11 +1327,11 @@ function paintSky(c) {
       const th = Math.acos(Math.min(1, Math.max(-1, ce * Math.cos(az) * sd[0] + dy * sd[1] + ce * Math.sin(az) * sd[2]))) * D, dAz = wrapDeg(az - sunAz);
       const col = skyRamp(e);
       const screen = (a, k) => { col[0] += a[0] * k * (1 - col[0] / 255); col[1] += a[1] * k * (1 - col[1] / 255); col[2] += a[2] * k * (1 - col[2] / 255); };
-      screen([255, 146, 58], 0.38 * Math.exp(-((dAz / 55) ** 2)) * Math.exp(-Math.max(e, 0) / 9) * (e > -6 ? 1 : 0));   // glowing horizon band around the sun
+      screen([255, 146, 58], 0.38 * Math.exp(-((dAz / 55) ** 2)) * Math.exp(-Math.max(e, 0) / 9) * (e > -6 ? 1 : 0));
       screen([255, 150, 64], 0.4 * Math.exp(-((th / 40) ** 2)));
       screen([255, 198, 112], 0.55 * Math.exp(-((th / 14) ** 2)));
       screen([255, 230, 175], 0.75 * Math.exp(-((th / 4.5) ** 2)));
-      screen([224, 132, 168], 0.2 * smooth(100, 160, dAz) * Math.exp(-(((e - 9) / 6) ** 2)));                          // pink counter-glow ("belt of Venus")
+      screen([224, 132, 168], 0.2 * smooth(100, 160, dAz) * Math.exp(-(((e - 9) / 6) ** 2)));
       const disc = th < 1.4 ? smooth(1.4, 0.8, th) : 0, o = (y * bw + x) * 4;
       bd[o] = col[0] + (255 - col[0]) * disc; bd[o + 1] = col[1] + (251 - col[1]) * disc; bd[o + 2] = col[2] + (236 - col[2]) * disc; bd[o + 3] = 255;
     }
@@ -1452,7 +1340,6 @@ function paintSky(c) {
   g.imageSmoothingEnabled = true; g.imageSmoothingQuality = "high";
   g.drawImage(base, 0, 0, W, H);
 
-  /* 2. clouds, computed on a reduced band (0..72 degrees above the horizon) and scaled up */
   const CW = Math.round(W * 0.375), CH = Math.round(H * 0.375), r0 = Math.floor((0.5 - 72 / 180) * CH), r1 = Math.floor(CH * 0.5) + 1, rows = r1 - r0;
   const cc = cvs(CW, rows), cg = cc.getContext("2d"), cim = cg.createImageData(CW, rows), cd = cim.data;
   const sx = Math.cos(sunAz) * 0.24, sz = Math.sin(sunAz) * 0.24;
@@ -1469,10 +1356,8 @@ function paintSky(c) {
       const ci = fbm(X * 0.26 + wx * 0.5, Z * 1.8 + wz * 0.5, 4), ci2 = fbm((X + sx) * 0.26 + wx * 0.5, (Z + sz) * 1.8 + wz * 0.5, 4);
       const th = Math.acos(Math.min(1, Math.max(-1, ce * Math.cos(az) * sd[0] + dy * sd[1] + ce * Math.sin(az) * sd[2]))) * D, s = smooth(100, 12, th);
       const hazeCol = mix(HAZE, [255, 170, 110], s * 0.6);
-      /* high cirrus veil */
       const a2 = smooth(0.5, 0.82, ci) * 0.5 * fadeCi * fadeLow;
       let c2 = mix(mix(HIGH_FAR, HIGH_NEAR, s), mix([150, 100, 150], [236, 140, 120], s), smooth(0.2, -0.4, (ci - ci2) * 5));
-      /* low broken deck */
       const dens = smooth(0.47, 0.73, d), a1 = dens * 0.96 * fadeLow * fadeHigh;
       let lit = 0.56 + (d - d2) * 3.4 - smooth(0.72, 1, d) * 0.28;
       lit = Math.min(1, Math.max(0, lit));
@@ -1488,7 +1373,6 @@ function paintSky(c) {
   cg.putImageData(cim, 0, 0);
   g.drawImage(cc, 0, r0 * (H / CH), W, rows * (H / CH));
 
-  /* 3. distant ridges fading into the horizon haze */
   const yH = (0.5 + 3 / 180) * H, yTop = (0.5 - 4 / 180) * H;
   [[0.5, 3.0, 2.3, [198, 150, 150], 11], [0.3, 2.0, 3.1, [160, 118, 130], 27], [0.1, 1.2, 4.0, [122, 92, 112], 43]].forEach(([b, amp, k, col, seed]) => {
     g.beginPath(); g.moveTo(0, yH);
@@ -1503,23 +1387,20 @@ function paintSky(c) {
   });
 }
 
-/* ---------- sky texture + dome ---------- */
 let skyDome = null;
 
 function makeSkyTexture() {
   const big = renderer.capabilities.maxTextureSize >= 4096, W = big ? 4096 : 2048, c = cvs(W, W / 2);
   paintSky(c);
-  const t = new THREE.CanvasTexture(c);                                           // sampled raw by the dome shader (no tone mapping), so the painted colours are shown as authored
+  const t = new THREE.CanvasTexture(c);
   t.generateMipmaps = false; t.minFilter = t.magFilter = THREE.LinearFilter; t.wrapS = THREE.RepeatWrapping; t.wrapT = THREE.ClampToEdgeWrapping;
-  const e = cvs(1024, 512);                                                       // a smaller copy lights the scene (image-based lighting) and tints reflections in the glazing
+  const e = cvs(1024, 512);
   e.getContext("2d").drawImage(c, 0, 0, 1024, 512);
   const env = new THREE.CanvasTexture(e);
   env.mapping = THREE.EquirectangularReflectionMapping; env.encoding = THREE.sRGBEncoding;
   return { dome: t, env };
 }
 
-/* Inside-out sky sphere that follows the camera and always sits behind everything. Direction -> equirect lookup is the same one three.js uses
-   for environment maps, so the painted sun, the sun light and the reflections all agree. */
 function makeSkyDome(tex) {
   const mat = new THREE.ShaderMaterial({
     uniforms: { map: { value: tex } }, side: THREE.BackSide, depthWrite: false, depthTest: false, fog: false,
@@ -1542,24 +1423,23 @@ function setShadowFrustum(center, half) {
 
 function setupLighting() {
   sunDirV = new THREE.Vector3(...SUN).normalize();
-  scene.add(new THREE.HemisphereLight(0xcdb4d6, 0x7a5a3c, 0.62));                 // lavender dusk sky above, warm earth bounce below
-  sun = new THREE.DirectionalLight(0xffb266, 2.5);                                // low, deep-golden sun
+  scene.add(new THREE.HemisphereLight(0xcdb4d6, 0x7a5a3c, 0.62));
+  sun = new THREE.DirectionalLight(0xffb266, 2.5);
   sun.castShadow = true;
   const SH = renderer.capabilities.maxTextureSize >= 4096 && Math.min(screen.width, screen.height) > 700 ? 4096 : 2048;
   sun.shadow.mapSize.set(SH, SH); sun.shadow.bias = -0.0003; sun.shadow.normalBias = 0.06; sun.shadow.radius = 2.5;
   scene.add(sun, sun.target);
   setShadowFrustum(new THREE.Vector3(8, 0, 8), 112);
-  const fill = new THREE.DirectionalLight(0x8f9fd8, 0.3); fill.position.set(-90, 40, -70); scene.add(fill);   // cool sky fill opposite the sun
+  const fill = new THREE.DirectionalLight(0x8f9fd8, 0.3); fill.position.set(-90, 40, -70); scene.add(fill);
   const tex = makeSkyTexture();
   skyDome = makeSkyDome(tex.dome);
   scene.add(skyDome);
   renderer.setClearColor(HAZE_HEX);
   try { const pm = new THREE.PMREMGenerator(renderer); scene.environment = pm.fromEquirectangular(tex.env).texture; pm.dispose(); } catch (e) { console.warn("environment lighting unavailable", e); }
   tex.env.dispose();
-  scene.fog = new THREE.Fog(HAZE_HEX, 170, 760);                                  // same colour as the horizon haze: the ground melts into the sky
+  scene.fog = new THREE.Fog(HAZE_HEX, 170, 760);
 }
 
-/* ---------- soft contact shadows under buildings (cheap ambient-occlusion substitute) ---------- */
 function addContactShadows() {
   const c = cvs(64, 64), g = c.getContext("2d"), gr = g.createRadialGradient(32, 32, 6, 32, 32, 32);
   gr.addColorStop(0, "rgba(0,0,0,0.55)"); gr.addColorStop(0.55, "rgba(0,0,0,0.38)"); gr.addColorStop(1, "rgba(0,0,0,0)");
@@ -1577,7 +1457,6 @@ function addContactShadows() {
   });
 }
 
-/* ---------- trees: instanced, positions from the aerial photo, never inside a footprint ---------- */
 function addTrees() {
   const raw = TREE_DATA.split(";").map((s) => s.split(",").map(Number));
   const courtRects = COURT_LAYOUT.map(pxCourtRect);
@@ -1592,14 +1471,10 @@ function addTrees() {
   const taken = (x, z, px, py) => ALLPARTS.some((pt) => inPart(pt, x, z, 4.0)) ||
     Object.values(SPECIAL_R).some(([sx, sy, r]) => { const [wx, wz] = pxToM(sx, sy); return Math.hypot(x - wx, z - wz) < r + 3; }) ||
     courtRects.some((rect) => rectsOverlap(rect, { cx: x, cz: z, w: 1.8, d: 1.8, rot: 0 }, 0.25)) || nearRoad(px, py);
-  // The oval track and its grass interior stay free of trees: a tree is skipped when it stands inside the track's outer edge
-  // (same superellipse as the track band in buildGround) or when its crown reaches that edge.
   const ovalEdge = Array.from({ length: 720 }, (_, i) => { const a = (i / 720) * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a); return [668 + 420 * Math.sign(ca) * Math.pow(Math.abs(ca), 0.74), 672 + 98 * Math.sign(sa) * Math.pow(Math.abs(sa), 0.74)]; });
   const onOval = (px, py, rp) => Math.pow(Math.abs(px - 668) / 420, 2 / 0.74) + Math.pow(Math.abs(py - 672) / 98, 2 / 0.74) <= 1 || ovalEdge.some(([ex, ey]) => Math.hypot(px - ex, py - ey) < rp * 0.95);
   const rnd = seeded(2024), list = [];
   raw.forEach(([px, py, rp]) => { const [x, z] = pxToM(px, py); if (stFromWorld(x, z)[1] < -2 && !taken(x, z, px, py) && !onOval(px, py, rp)) list.push({ x, z, r: Math.max(2.2, rp * METERS_PER_PX * 0.95) }); });
-  /* Groves in the open parts of the campus that the photographed trees leave bare (west, north and east edges), grown in clumps rather than evenly,
-     and kept clear of buildings, courts, the oval, trails and the street footpath. */
   { const irnd = seeded(77), [hx, hz] = CAMPUS_HALF;
     for (let k = 0, added = 0; k < 7000 && added < 260; k++) {
       const x = (irnd() * 2 - 1) * (hx - 5), z = (irnd() * 2 - 1) * (hz - 5), [px, py] = mToPx(x, z);
@@ -1608,7 +1483,7 @@ function addTrees() {
       if (createdTrails.some(([a, b]) => distanceToSegment([px, py], a, b) < 24)) continue;
       list.push({ x, z, r: 2.8 + irnd() * 2.2 }); added++;
     } }
-  const far = URBAN_TREES.slice();                                              // street trees, boundary planting and parks between the surrounding blocks
+  const far = URBAN_TREES.slice();
   const all = list.concat(far), N = all.length * 3;
   const leaf = cvs(64, 64), lg = leaf.getContext("2d");
   lg.fillStyle = "#6a8a3c"; lg.fillRect(0, 0, 64, 64);
@@ -1629,7 +1504,6 @@ function addTrees() {
   });
   [foliage, trunks].forEach((m) => { m.castShadow = true; m.receiveShadow = true; m.instanceMatrix.needsUpdate = true; scene.add(m); });
   foliage.instanceColor.needsUpdate = true;
-  // contact shadows under campus trees
   const near = list, sc = cvs(64, 64), sg = sc.getContext("2d"), gr = sg.createRadialGradient(32, 32, 4, 32, 32, 32);
   gr.addColorStop(0, "rgba(0,0,0,0.5)"); gr.addColorStop(1, "rgba(0,0,0,0)"); sg.fillStyle = gr; sg.fillRect(0, 0, 64, 64);
   const sh = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(sc), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }), near.length);
@@ -1637,19 +1511,8 @@ function addTrees() {
   sh.renderOrder = 1; scene.add(sh);
 }
 
-/* =====================================================================
-   Location markers (pins)
-   ===================================================================== */
-
-// golden-hour sun from the south-east (matches the light in the aerial photo)
 const PIN_PX = 26;
 
-/* ---------- location markers: compact glass badges with a pointer tip, constant on-screen size ----------
-   A sprite cannot blur what is behind it, so the glass look is built from a translucent tinted body (0.78 alpha at rest),
-   a soft top-left sheen, an inner rim light and a diffused shadow that is cut out under the body so the glass stays see-through.
-   Hover and selected are continuous levels (0..1) that ease toward their target each frame, so the border, glow and
-   opacity change smoothly instead of swapping between textures. Category identity is unchanged: gold badges carry a
-   red rim, red badges carry a gold rim. */
 const PIN_GLASS = {
   landmark: { top: [255, 216, 112], bottom: [232, 160, 24], litTop: [255, 233, 156], litBottom: [247, 183, 44], shade: [120, 60, 0], edge: [122, 0, 0], edgeLit: [176, 28, 28], glow: [255, 201, 77], ink: "#3a0a0a" },
   academic: { top: [160, 34, 32], bottom: [100, 4, 4], litTop: [190, 46, 44], litBottom: [130, 14, 14], shade: [30, 0, 0], edge: [241, 180, 52], edgeLit: [255, 214, 110], glow: [224, 48, 48], ink: "#ffffff" }
@@ -1657,15 +1520,13 @@ const PIN_GLASS = {
 const mixRgb = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
 const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
 
-/* Draws one pin into its canvas. h = hover level, a = selected level (both 0..1). */
 function drawPin(c, loc, h, a) {
   const lm = categoryOf(loc) === "landmark", P = PIN_GLASS[lm ? "landmark" : "academic"], g = c.getContext("2d");
   const cx = 64, cy = 62, r = 46, lit = Math.min(1, 0.45 * h + a), alpha = Math.min(0.96, 0.78 + 0.06 * h + 0.16 * a);
-  const body = new Path2D();                                  // one path (circle + tip) so the translucent fill never double-blends
+  const body = new Path2D();
   body.arc(cx, cy, r, 0, Math.PI * 2); body.moveTo(cx - 24, cy + 36); body.lineTo(cx + 24, cy + 36); body.lineTo(cx, 154); body.closePath();
   g.clearRect(0, 0, c.width, c.height);
 
-  /* diffused drop shadow, plus a restrained tinted glow when hovered / selected; the body is then cut out of both */
   g.save(); g.fillStyle = "#000";
   g.shadowColor = `rgba(0,0,0,${0.34 + 0.14 * a})`; g.shadowBlur = 12 + 3 * a; g.shadowOffsetY = 5 + 2 * a; g.fill(body);
   const glow = 0.5 * h + 0.4 * a;
@@ -1673,31 +1534,28 @@ function drawPin(c, loc, h, a) {
   g.restore();
   g.globalCompositeOperation = "destination-out"; g.fillStyle = "#000"; g.fill(body); g.globalCompositeOperation = "source-over";
 
-  /* tinted glass body: lighter top-left, deeper bottom-right */
   const fillG = g.createLinearGradient(cx - 34, cy - 40, cx + 30, 154);
   fillG.addColorStop(0, rgba(mixRgb(P.top, P.litTop, lit), alpha)); fillG.addColorStop(1, rgba(mixRgb(P.bottom, P.litBottom, lit), alpha));
   g.fillStyle = fillG; g.fill(body);
 
-  const w = 5 + h + 2 * a;                                    // outer rim width grows slightly with hover / selection
+  const w = 5 + h + 2 * a;
   g.save(); g.clip(body);
-  const shade = g.createRadialGradient(cx - 14, cy - 18, r * 0.5, cx - 14, cy - 18, r * 1.5);   // soft depth toward the lower right
+  const shade = g.createRadialGradient(cx - 14, cy - 18, r * 0.5, cx - 14, cy - 18, r * 1.5);
   shade.addColorStop(0, rgba(P.shade, 0)); shade.addColorStop(1, rgba(P.shade, 0.22));
   g.fillStyle = shade; g.fillRect(0, 0, c.width, c.height);
-  g.save(); g.translate(cx - 8, cy - 24); g.rotate(-0.45); g.beginPath(); g.ellipse(0, 0, 34, 19, 0, 0, Math.PI * 2);   // top-left specular sheen
+  g.save(); g.translate(cx - 8, cy - 24); g.rotate(-0.45); g.beginPath(); g.ellipse(0, 0, 34, 19, 0, 0, Math.PI * 2);
   const sheen = g.createLinearGradient(0, -19, 0, 19);
   sheen.addColorStop(0, `rgba(255,255,255,${0.34 + 0.1 * lit})`); sheen.addColorStop(1, "rgba(255,255,255,0.02)");
   g.fillStyle = sheen; g.fill(); g.restore();
-  const rim = g.createLinearGradient(cx - r, cy - r, cx + r, cy + r);                           // inner rim light, strongest top-left
+  const rim = g.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
   rim.addColorStop(0, "rgba(255,255,255,0.8)"); rim.addColorStop(0.55, "rgba(255,255,255,0.18)"); rim.addColorStop(1, "rgba(255,255,255,0.06)");
   g.lineWidth = 3; g.strokeStyle = rim; g.beginPath(); g.arc(cx, cy, r - w / 2 - 1.8, 0, Math.PI * 2); g.stroke();
   g.restore();
 
-  /* outer rim: category contrast colour at rest, brighter on hover, white when selected (with the inner category ring) */
   g.lineWidth = w; g.strokeStyle = rgba(mixRgb(mixRgb(P.edge, P.edgeLit, h), [255, 255, 255], a), 0.94);
   g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.stroke();
   if (a > 0.01) { g.lineWidth = 4; g.strokeStyle = rgba(P.edge, a); g.beginPath(); g.arc(cx, cy, r - 9, 0, Math.PI * 2); g.stroke(); }
 
-  /* number, drawn last so the sheen never sits on top of it */
   g.save(); g.fillStyle = P.ink; g.font = `700 ${String(loc.id).length > 1 ? 52 : 62}px Manrope, Arial, sans-serif`; g.textAlign = "center"; g.textBaseline = "middle";
   if (!lm) { g.shadowColor = "rgba(0,0,0,0.4)"; g.shadowBlur = 4; g.shadowOffsetY = 2; }
   g.fillText(String(loc.id), cx, cy + 3); g.restore();
@@ -1710,7 +1568,7 @@ function makePinTexture(loc) {
   return t;
 }
 
-function buildPin(loc, anchorY) {
+function buildPin(loc) {
   const group = new THREE.Group(), spriteMat = new THREE.SpriteMaterial({ transparent: true, depthWrite: false });
   const tex = makePinTexture(loc);
   spriteMat.map = tex;
@@ -1720,7 +1578,6 @@ function buildPin(loc, anchorY) {
   return { group, sprite, spriteMat, tex, lvl: { h: 0, a: 0 }, tgt: { h: 0, a: 0 }, state: "idle" };
 }
 
-/* Sets the target hover / selected levels; the render loop eases toward them and redraws only while they change. */
 function applyPinTexture(p, loc) {
   const st = loc.id === state.activeId ? "active" : loc.id === hoverId ? "hover" : "idle";
   if (p.state === st) return;
@@ -1732,7 +1589,7 @@ function applyPinTexture(p, loc) {
 function resolvePinOverlap() {
   const w = renderer.domElement.clientWidth, h = renderer.domElement.clientHeight, v = new THREE.Vector3();
   const order = [...pins.keys()].sort((a, b) => {
-    const pa = pins.get(a), pb = pins.get(b), sa = (a === state.activeId ? 4 : 0) + (state.destIds.includes(a) ? 3 : 0) + (a === hoverId ? 2 : 0) + (categoryOf(locById.get(a)) === "landmark" ? 1 : 0);
+    const sa = (a === state.activeId ? 4 : 0) + (state.destIds.includes(a) ? 3 : 0) + (a === hoverId ? 2 : 0) + (categoryOf(locById.get(a)) === "landmark" ? 1 : 0);
     const sb = (b === state.activeId ? 4 : 0) + (state.destIds.includes(b) ? 3 : 0) + (b === hoverId ? 2 : 0) + (categoryOf(locById.get(b)) === "landmark" ? 1 : 0);
     return sb - sa || a - b;
   });
@@ -1741,24 +1598,19 @@ function resolvePinOverlap() {
     const p = pins.get(id);
     v.copy(p.worldPos).project(camera);
     if (v.z > 1 || v.z < -1) { p.collapsed = false; return; }
-    const sx = (v.x * 0.5 + 0.5) * w, sy = (-v.y * 0.5 + 0.5) * h - rad;          // badge centre sits above the tip
+    const sx = (v.x * 0.5 + 0.5) * w, sy = (-v.y * 0.5 + 0.5) * h - rad;
     const hit = placed.some((q) => Math.hypot(q[0] - sx, q[1] - sy) < rad * 2 - 2);
-    p.collapsed = hit && targetOf(p, id) <= 1.0;
-    if (!p.collapsed || targetOf(p, id) > 1.0) placed.push([sx, sy]);
+    p.collapsed = hit && targetOf(id) <= 1.0;
+    if (!p.collapsed || targetOf(id) > 1.0) placed.push([sx, sy]);
   });
 }
 
-const targetOf = (p, id) => (id === state.activeId ? 1.35 : state.destIds.includes(id) ? 1.15 : id === hoverId ? 1.12 : 1);
+const targetOf = (id) => (id === state.activeId ? 1.35 : state.destIds.includes(id) ? 1.15 : id === hoverId ? 1.12 : 1);
 
 function refreshPinStates() {
   if (ready) pins.forEach((p, id) => applyPinTexture(p, locById.get(id)));
 }
 
-/* =====================================================================
-   Guide lines and visual state
-   ===================================================================== */
-
-/* ---------- guide lines (direct-line guides between marker positions) ---------- */
 function clearPaths() {
   while (pathGroup.children.length) {
     const m = pathGroup.children.pop();
@@ -1801,7 +1653,6 @@ function rebuildPaths() {
   dashTex.dispose();
 }
 
-/* ---------- visual state ---------- */
 export function updateVisualState() {
   if (!ready) return;
   pins.forEach((p, id) => {
@@ -1814,20 +1665,11 @@ export function updateVisualState() {
   rebuildPaths();
 }
 
-/* =====================================================================
-   Camera, view modes and zoom
-   ===================================================================== */
-
-/* Offset of length len from the focal point to the camera, in the preferred orbit direction (ORBIT_VIEW). */
 function obliqueDir(len) {
   const a = THREE.MathUtils.degToRad(ORBIT_VIEW.azimuth), e = THREE.MathUtils.degToRad(ORBIT_VIEW.elevation);
   return new THREE.Vector3(Math.cos(e) * Math.sin(a), Math.sin(e), Math.cos(e) * Math.cos(a)).multiplyScalar(len);
 }
 
-/* Home pose, used for the landing view, Orbit View and reset: the preferred direction, with the focal point and distance
-   solved so that every location marker sits inside ORBIT_VIEW.frame for the given viewport aspect. The distance is the
-   smallest that fits; the focal point is shifted sideways until the markers are centred (seen from an oblique angle the
-   nearer side of the campus reads wider, so the geometric centre alone looks lopsided). */
 function orbitHomePose(aspect = camera.aspect) {
   const { frame, maxDistance } = ORBIT_VIEW;
   const dir = obliqueDir(1), fwd = dir.clone().negate();
@@ -1842,13 +1684,13 @@ function orbitHomePose(aspect = camera.aspect) {
     dist = 0;
     const rel = pts.map((p) => p.clone().sub(focus));
     for (const r of rel) {
-      const x = r.dot(right), y = r.dot(up), z = r.dot(fwd);        // z = how far the point lies beyond the focal plane
+      const x = r.dot(right), y = r.dot(up), z = r.dot(fwd);
       dist = Math.max(dist, Math.abs(x) / (tanH * frame.x) - z, y / (tanV * (y > 0 ? frame.top : frame.bottom)) - z);
     }
     dist = THREE.MathUtils.clamp(dist, MIN_ZOOM_DISTANCE, maxDistance);
     let lo = Infinity, hi = -Infinity;
     for (const r of rel) { const n = r.dot(right) / (tanH * (dist + r.dot(fwd))); lo = Math.min(lo, n); hi = Math.max(hi, n); }
-    focus.addScaledVector(right, ((lo + hi) / 2) * tanH * dist);    // re-centre horizontally
+    focus.addScaledVector(right, ((lo + hi) / 2) * tanH * dist);
   }
   return { pos: focus.clone().addScaledVector(dir, dist), target: focus };
 }
@@ -1856,7 +1698,7 @@ function orbitHomePose(aspect = camera.aspect) {
 function onResize() {
   const w = window.innerWidth, h = window.innerHeight;
   let atHome = false;
-  if (ready && state.mode === "orbit" && !fly) {                   // still untouched on the home pose? then re-fit it to the new viewport
+  if (ready && state.mode === "orbit" && !fly) {
     const home = orbitHomePose();
     atHome = camera.position.distanceToSquared(home.pos) < 0.01 && controls.target.distanceToSquared(home.target) < 0.01;
   }
@@ -1875,7 +1717,6 @@ function onResize() {
   }
 }
 
-/* Top-down pose: camera straight above the map centre, high enough that the whole map fits the viewport */
 function topDownPose() {
   const half = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
   const height = Math.max(WORLD_H / 2 / half, WORLD_W / 2 / (half * camera.aspect)) * 1.02;
@@ -1893,7 +1734,6 @@ function setCameraFar(far) {
   camera.updateProjectionMatrix();
 }
 
-/* ---------- camera ---------- */
 function flyTo(pos, target, dur = 950, onDone) {
   if (!ready) return;
   if (reduceMotion) {
@@ -1907,8 +1747,6 @@ function flyTo(pos, target, dur = 950, onDone) {
 function applyLimits(m) {
   const c = controls;
   c.enableRotate = c.enableZoom = c.enablePan = true;
-  // Top-down view: the primary pointer (left mouse button / one finger) pans the map instead of rotating it.
-  // OrbitControls binds both to ROTATE by default, which is a no-op once rotation is disabled for top-down.
   const panPrimary = state.mode === "topdown";
   c.mouseButtons.LEFT = panPrimary ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE;
   c.touches.ONE = panPrimary ? THREE.TOUCH.PAN : THREE.TOUCH.ROTATE;
@@ -1987,7 +1825,6 @@ export function focusLocation(id) {
   }
 }
 
-/* ---------- zoom in / out: step along the current view; limits are shared with wheel / pinch zoom ---------- */
 function maxZoomDistance() {
   return state.mode === "topdown" ? Math.max(MAX_ZOOM_DISTANCE, topDownPose().height * 1.5) : MAX_ZOOM_DISTANCE;
 }
@@ -2017,12 +1854,10 @@ export function syncDock() {
   document.querySelectorAll("[data-mode]").forEach((b) => {
     const on = b.dataset.mode === state.mode;
     b.setAttribute("aria-pressed", String(on));
-    b.classList.toggle("is-on", on);
   });
   syncZoomButtons();
 }
 
-/* Binds the view-mode buttons, zoom buttons and keyboard (walking keys + Escape). */
 export function bindCameraControls({ onEscape }) {
   document.querySelectorAll("[data-mode]").forEach((b) => b.addEventListener("click", () => {
     if (b.dataset.mode === state.mode && b.dataset.mode !== "topdown") return;
@@ -2041,15 +1876,10 @@ export function bindCameraControls({ onEscape }) {
   window.addEventListener("blur", () => keys.clear());
 }
 
-/* =====================================================================
-   Picking, hover and tooltip
-   ===================================================================== */
-
 const raycaster = typeof THREE !== "undefined" ? new THREE.Raycaster() : null;
 
 const ndc = typeof THREE !== "undefined" ? new THREE.Vector2() : null;
 
-/* ---------- picking + tooltip ---------- */
 function pickAt(cx, cy) {
   const r = renderer.domElement.getBoundingClientRect();
   ndc.set(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1);
@@ -2092,16 +1922,11 @@ function hideTooltip() {
   dom.tooltip.setAttribute("aria-hidden", "true");
 }
 
-/* =====================================================================
-   Scene setup
-   ===================================================================== */
-
-/* ---------- scene setup (3D campus) ---------- */
 export function initScene({ onSelectLocation }) {
   if (!window.THREE || !THREE.OrbitControls) throw new Error("Three.js failed to load (network or CDN blocked).");
   try {
     renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-  } catch (e) {
+  } catch {
     throw new Error("WebGL is not available in this browser.");
   }
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -2129,19 +1954,17 @@ export function initScene({ onSelectLocation }) {
   campusLocations.forEach((loc) => {
     const r = rec[loc.id], [mx, mz] = pxToM(loc.coordinates.center.x, loc.coordinates.center.y);
     const own = r.parts.find((pt) => inPart(pt, mx, mz, 1)), hosts = ALLPARTS.filter((pt) => pt.id !== 0 && inPart(pt, mx, mz, 1));
-    // a marker sits on its own structure; markers without a model (e.g. #21 on the Main Academic Building facade) sit on whatever they overlap
     const anchor = r.sp ? (r.sp.anchorY ?? (own ? own.topY : r.sp.topY)) : own ? own.topY : r.parts.length ? Math.max(...r.parts.map((pt) => pt.topY)) : hosts.length ? Math.max(...hosts.map((pt) => pt.topY)) : 1.8;
-    const base = toWorld(loc.coordinates.center), pin = buildPin(loc, anchor);
+    const base = toWorld(loc.coordinates.center), pin = buildPin(loc);
     pin.group.position.set(base.x, (anchor + 0.5) * M, base.z);
     scene.add(pin.group);
     pickables.push(pin.sprite);
-    pins.set(loc.id, { ...pin, build: { mats: r.mats.concat(LOC_GROUND_MATS[loc.id] || []) }, base, worldPos: pin.group.position, topY: anchor * M, scale: 1, targetScale: 1, opacity: 1, targetOpacity: 1, collapsed: false, keep: false });
+    pins.set(loc.id, { ...pin, build: { mats: r.mats.concat(LOC_GROUND_MATS[loc.id] || []) }, base, worldPos: pin.group.position, scale: 1, opacity: 1, targetOpacity: 1, collapsed: false, keep: false });
   });
 
   pathGroup = new THREE.Group();
   scene.add(pathGroup);
 
-  /* controls */
   controls = new THREE.OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
@@ -2149,18 +1972,16 @@ export function initScene({ onSelectLocation }) {
   controls.addEventListener("start", () => {
     const interrupted = fly;
     fly = null;
-    // A drag that interrupts the fly-to-top-down must still land in the fixed top-down orientation.
     if (interrupted && state.mode === "topdown") applyLimits("topdown");
   });
   controls.addEventListener("change", syncZoomButtons);
 
-  onResize();                                                      // size the renderer and camera aspect first: the home pose is fitted to the viewport
+  onResize();
   const home = orbitHomePose();
   camera.position.copy(home.pos);
   controls.target.copy(home.target);
   applyLimits("orbit");
 
-  /* input */
   const el = renderer.domElement;
   el.addEventListener("pointermove", (e) => { pointer.x = e.clientX; pointer.y = e.clientY; pointer.moved = true; pointer.inside = true; });
   el.addEventListener("pointerleave", () => { pointer.inside = false; setHover(null); });
@@ -2174,11 +1995,6 @@ export function initScene({ onSelectLocation }) {
   ready = true;
 }
 
-/* =====================================================================
-   Render loop
-   ===================================================================== */
-
-/* ---------- render loop ---------- */
 export function animate(now) {
   requestAnimationFrame(animate);
   const dt = Math.min(0.05, (now - lastFrame) / 1000 || 0.016);
@@ -2218,9 +2034,9 @@ export function animate(now) {
   const perPx = (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) / (renderer.domElement.clientHeight || 800);
   if (overlapFrame++ % 6 === 0) resolvePinOverlap();
   pins.forEach((p, id) => {
-    const tgt = p.collapsed && !p.keep && id !== hoverId ? 0.45 : targetOf(p, id);
+    const tgt = p.collapsed && !p.keep && id !== hoverId ? 0.45 : targetOf(id);
     const L = p.lvl, T = p.tgt;
-    if (L.h !== T.h || L.a !== T.a) {                         // glass pin: ease hover / selected levels and redraw only while they change
+    if (L.h !== T.h || L.a !== T.a) {
       const kp = reduceMotion ? 1 : k;
       L.h += (T.h - L.h) * kp; L.a += (T.a - L.a) * kp;
       if (Math.abs(T.h - L.h) < 0.01) L.h = T.h;
@@ -2247,7 +2063,6 @@ export function animate(now) {
   }
 }
 
-/* Reset the camera to the home view (used by the app-level reset). */
 export function resetCameraView() {
   if (ready) {
     setFogEnabled(true);
