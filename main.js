@@ -1,4 +1,3 @@
-/* Entry point: connects the modules and starts the app. */
 import { animate, bindCameraControls, initScene, resetCameraView, syncDock, updateVisualState } from "./scene.js";
 import { DEFAULT_ACTIVE_ID, DEFAULT_DEST_IDS, state } from "./appState.js";
 import { initNavigation, renderDirectory, renderInfo, selectLocation, setPanelOpen, syncFilterState } from "./navigation.js";
